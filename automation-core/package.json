@@ -1,0 +1,41 @@
+{
+  "name": "automation-core",
+  "version": "1.0.0",
+  "description": "Foxy AI - TypeScript Automation Core with Playwright",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "server": "tsx src/server.ts",
+    "test": "tsx src/test.ts",
+    "install-browsers": "npx playwright install firefox"
+  },
+  "keywords": [
+    "automation",
+    "playwright",
+    "firefox",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node-fetch": "^2.6.13",
+    "@types/ws": "^8.18.1",
+    "axios": "^1.13.4",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.58.0",
+    "ws": "^8.19.0"
+  }
+}

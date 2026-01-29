@@ -5,12 +5,15 @@ from datetime import datetime
 class Step(BaseModel):
     """A single automation step"""
     id: str
-    type: Literal["navigate", "click", "type", "scroll", "wait", "extract_text"]
+    type: Literal["navigate", "click", "type", "scroll", "wait", "extract_text", "click_at", "screenshot", "vision_click"]
     selector: Optional[str] = None
     text: Optional[str] = None
     url: Optional[str] = None
     amount: Optional[int] = None
     timeout: Optional[int] = None
+    x: Optional[int] = None  # X coordinate for click_at
+    y: Optional[int] = None  # Y coordinate for click_at
+    description: Optional[str] = None  # Description for vision-based clicks
 
 class TaskPlan(BaseModel):
     """A complete automation plan"""

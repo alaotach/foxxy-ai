@@ -1,13 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from agent.planner import plan_task, replan_with_feedback
 from agent.schema import TaskPlan, ExecutionFeedback, TaskMemory
 from agent.memory import memory_manager
+from agent.websocket_manager import manager as ws_manager
+from agent.vision import VisionAutomation
 from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 import os
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -62,6 +65,37 @@ def create_plan(request: PlanRequest):
         return plan
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/vision/find_element")
+async def vision_find_element(request: dict):
+    """Find element coordinates using vision AI"""
+    screenshot = request.get("screenshot")
+    description = request.get("description")
+    viewport_width = request.get("viewport_width", 1920)
+    viewport_height = request.get("viewport_height", 1080)
+    
+    if not screenshot or not description:
+        return {"error": "screenshot and description are required"}
+    
+    vision = VisionAutomation(provider="hackclub")
+    coords = vision.find_element_coordinates(
+        screenshot, 
+        description,
+        viewport_width,
+        viewport_height
+    )
+    
+    if coords:
+        return {
+            "success": True,
+            "x": coords[0],
+            "y": coords[1]
+        }
+    else:
+        return {
+            "success": False,
+            "error": "Element not found"
+        }
 
 @app.post("/feedback")
 def submit_feedback(request: FeedbackRequest):
@@ -143,6 +177,90 @@ def get_all_memories():
     return {
         "tasks": memory_manager.get_all_memories()
     }
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time updates.
+    
+    Connect to receive live updates during task execution:
+    - Planning progress
+    - Step-by-step execution
+    - Results and errors
+    """
+    task_id = "default"
+    await ws_manager.connect(websocket, task_id)
+    
+    try:
+        while True:
+            # Keep connection alive and listen for messages
+            data = await websocket.receive_text()
+            
+            # Echo back for testing
+            await websocket.send_json({
+                "type": "ping",
+                "message": "Connection alive"
+            })
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, task_id)
+        print(f"Client disconnected from WebSocket")
+
+@app.websocket("/ws/{task_id}")
+async def websocket_task_endpoint(websocket: WebSocket, task_id: str):
+    """WebSocket endpoint for specific task updates"""
+    await ws_manager.connect(websocket, task_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Handle client messages if needed
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, task_id)
+
+@app.post("/vision/find_element")
+async def vision_find_element(request: dict):
+    """Find element coordinates using vision AI"""
+    screenshot = request.get("screenshot")
+    description = request.get("description")
+    viewport_width = request.get("viewport_width", 1920)
+    viewport_height = request.get("viewport_height", 1080)
+    
+    if not screenshot or not description:
+        return {"error": "screenshot and description are required"}
+    
+    vision = VisionAutomation(provider="hackclub")
+    coords = vision.find_element_coordinates(
+        screenshot, 
+        description,
+        viewport_width,
+        viewport_height
+    )
+    
+    if coords:
+        return {
+            "success": True,
+            "x": coords[0],
+            "y": coords[1]
+        }
+    else:
+        return {
+            "success": False,
+            "error": "Element not found"
+        }
+
+@app.post("/vision/analyze")
+async def vision_analyze(request: dict):
+    """Analyze screenshot and answer questions"""
+    screenshot = request.get("screenshot")
+    question = request.get("question")
+    
+    if not screenshot or not question:
+        return {"error": "screenshot and question are required"}
+    
+    vision = VisionAutomation(provider="hackclub")
+    answer = vision.analyze_screenshot(screenshot, question)
+    
+    return {"answer": answer}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
