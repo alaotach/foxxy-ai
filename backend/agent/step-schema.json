@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "task_id": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "click",
+              "type",
+              "scroll",
+              "wait",
+              "extract_text"
+            ]
+          },
+          "selector": { "type": "string" },
+          "text": { "type": "string" },
+          "url": { "type": "string" },
+          "amount": { "type": "number" },
+          "timeout": { "type": "number" }
+        },
+        "required": ["id", "type"]
+      }
+    }
+  },
+  "required": ["task_id", "steps"]
+}
