@@ -3,3 +3,5 @@ __pycache__/
 *.md
 node_modules/
 *.ps1
+*.txt
+prompt.txt

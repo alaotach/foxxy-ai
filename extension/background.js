@@ -4,6 +4,11 @@
 
 console.log('🦊 Foxy AI background service worker loaded');
 
+// Side panel handler - opens the side panel when extension icon is clicked
+chrome.action.onClicked.addListener((tab) => {
+  chrome.sidePanel.open({ windowId: tab.windowId });
+});
+
 // Configuration
 const BACKEND_URL = 'http://localhost:8000';
 const WS_URL = 'ws://localhost:8000/ws';

@@ -12,6 +12,242 @@ const BACKEND_URL = 'http://localhost:8000';
 const SCREENSHOT_OVERLAY_KEY = 'foxyShowScreenshots';
 const SCREENSHOT_OVERLAY_MAX_WIDTH = 260;
 
+// Automation visual indicator
+let automationOverlay = null;
+let shaderAnimationFrame = null;
+
+function showAutomationAura() {
+  if (automationOverlay) return;
+  
+  automationOverlay = document.createElement('div');
+  automationOverlay.id = 'foxy-ai-root';
+  
+  // Create canvas for shader animation
+  const canvas = document.createElement('canvas');
+  canvas.id = 'foxy-ai-automation-aura';
+  canvas.style.cssText = `
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 2147483647;
+  `;
+  
+  // Create status pill
+  const statusDiv = document.createElement('div');
+  statusDiv.id = 'foxy-ai-status';
+  statusDiv.innerHTML = `
+    <style>
+      #foxy-ai-status {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 2147483648;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 24px;
+        border-radius: 50px;
+        background: rgba(15, 15, 15, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 165, 0, 0.25);
+        box-shadow: 
+          0 10px 25px rgba(0, 0, 0, 0.6),
+          0 0 15px rgba(255, 140, 0, 0.15);
+        color: rgba(255, 255, 255, 0.9);
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+      }
+      .foxy-icon {
+        width: 8px;
+        height: 8px;
+        background-color: #ffaa00;
+        border-radius: 2px;
+        box-shadow: 0 0 10px #ffaa00;
+        animation: foxy-blink 1.5s infinite ease-in-out;
+      }
+      @keyframes foxy-blink {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.85); }
+      }
+    </style>
+    <div class="foxy-icon"></div>
+    <span>Working...</span>
+  `;
+  
+  automationOverlay.appendChild(canvas);
+  automationOverlay.appendChild(statusDiv);
+  document.documentElement.appendChild(automationOverlay);
+  
+  // Initialize WebGL shader animation
+  initShaderAnimation(canvas);
+  
+  console.log('🎨 WebGL shader aura activated!');
+}
+
+function initShaderAnimation(canvas) {
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) {
+    console.warn('WebGL not supported, falling back to CSS');
+    return;
+  }
+  
+  // Resize canvas to window size
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  };
+  resize();
+  window.addEventListener('resize', resize);
+  
+  // Vertex shader - just passes through positions
+  const vertexShaderSource = `
+    attribute vec2 position;
+    void main() {
+      gl_Position = vec4(position, 0.0, 1.0);
+    }
+  `;
+  
+  // Fragment shader - creates wavy, pulsating orange glow
+  const fragmentShaderSource = `
+    precision mediump float;
+    uniform float time;
+    uniform vec2 resolution;
+    
+    void main() {
+      vec2 uv = gl_FragCoord.xy / resolution;
+      vec2 center = vec2(0.5, 0.5);
+      
+      // Distance from center (for radial gradient)
+      float dist = distance(uv, center);
+      
+      // Distance from edges
+      float edgeDist = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+      
+      // Wavy animation along edges
+      float wave1 = sin(uv.x * 20.0 + time * 2.0) * 0.02;
+      float wave2 = sin(uv.y * 15.0 - time * 1.5) * 0.02;
+      float wave3 = sin((uv.x + uv.y) * 10.0 + time * 3.0) * 0.015;
+      float wavyEdge = edgeDist + wave1 + wave2 + wave3;
+      
+      // Pulsating intensity (0.75 to 1.0 - never goes below 75%)
+      float pulse = 0.75 + 0.25 * sin(time * 2.0);
+      
+      // Moving gradient flow
+      float flow = sin(uv.x * 3.0 + uv.y * 2.0 + time * 1.2) * 0.5 + 0.5;
+      
+      // Edge glow (stronger near edges)
+      float edgeGlow = smoothstep(0.2, 0.0, wavyEdge) * pulse;
+      
+      // Corner glows
+      vec2 cornerTL = uv;
+      vec2 cornerTR = vec2(1.0 - uv.x, uv.y);
+      vec2 cornerBL = vec2(uv.x, 1.0 - uv.y);
+      vec2 cornerBR = vec2(1.0 - uv.x, 1.0 - uv.y);
+      
+      float cornerGlow = 0.0;
+      cornerGlow += smoothstep(0.3, 0.0, length(cornerTL)) * 0.6;
+      cornerGlow += smoothstep(0.3, 0.0, length(cornerTR)) * 0.6;
+      cornerGlow += smoothstep(0.3, 0.0, length(cornerBL)) * 0.6;
+      cornerGlow += smoothstep(0.3, 0.0, length(cornerBR)) * 0.6;
+      cornerGlow *= pulse;
+      
+      // Radial vignette (darker center, glowing edges)
+      float vignette = smoothstep(0.3, 1.0, dist) * 0.4;
+      
+      // Combine all effects with minimum floor
+      float intensity = max(0.3, edgeGlow + cornerGlow + vignette * flow);
+      
+      // Orange color palette (#FF8C00, #FFA500, #FFB900)
+      vec3 color1 = vec3(1.0, 0.549, 0.0);  // #FF8C00
+      vec3 color2 = vec3(1.0, 0.647, 0.0);  // #FFA500
+      vec3 color3 = vec3(1.0, 0.725, 0.0);  // #FFB900
+      
+      // Mix colors based on flow
+      vec3 orangeColor = mix(color1, color2, flow);
+      orangeColor = mix(orangeColor, color3, sin(time * 0.8) * 0.5 + 0.5);
+      
+      // Final color with alpha (never below 30% * 0.7 = 21% opacity)
+      gl_FragColor = vec4(orangeColor, intensity * 0.7);
+    }
+  `;
+  
+  // Compile shaders
+  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vertexShader, vertexShaderSource);
+  gl.compileShader(vertexShader);
+  
+  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fragmentShader, fragmentShaderSource);
+  gl.compileShader(fragmentShader);
+  
+  // Create program
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.useProgram(program);
+  
+  // Create fullscreen quad
+  const positions = new Float32Array([
+    -1, -1,
+     1, -1,
+    -1,  1,
+     1,  1
+  ]);
+  
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+  
+  const positionLocation = gl.getAttribLocation(program, 'position');
+  gl.enableVertexAttribArray(positionLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+  
+  // Get uniform locations
+  const timeLocation = gl.getUniformLocation(program, 'time');
+  const resolutionLocation = gl.getUniformLocation(program, 'resolution');
+  
+  // Enable blending for transparency
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  
+  // Animation loop
+  const startTime = Date.now();
+  function animate() {
+    const time = (Date.now() - startTime) / 1000.0;
+    
+    gl.uniform1f(timeLocation, time);
+    gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+    
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    
+    shaderAnimationFrame = requestAnimationFrame(animate);
+  }
+  animate();
+}
+
+function hideAutomationAura() {
+  if (shaderAnimationFrame) {
+    cancelAnimationFrame(shaderAnimationFrame);
+    shaderAnimationFrame = null;
+  }
+  if (automationOverlay) {
+    automationOverlay.remove();
+    automationOverlay = null;
+    console.log('🎨 Automation aura removed');
+  }
+}
+
 function getShowScreenshotOverlay() {
   const stored = localStorage.getItem(SCREENSHOT_OVERLAY_KEY);
   if (stored === null) return true;
@@ -732,6 +968,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'executeStep') {
     executeStepVision(message.step).then(sendResponse);
     return true; // Keep channel open for async
+  }
+  
+  if (message.action === 'startAutomation') {
+    showAutomationAura();
+    sendResponse({ success: true });
+    return true;
+  }
+  
+  if (message.action === 'stopAutomation') {
+    hideAutomationAura();
+    sendResponse({ success: true });
+    return true;
   }
   
   if (message.action === 'getPageInfo') {

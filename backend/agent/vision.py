@@ -15,7 +15,7 @@ class VisionAutomation:
     def __init__(self, provider: str = "hackclub"):
         self.provider = provider
         self.api_key = os.getenv("HACKCLUB_API_KEY")
-        self.model = "qwen/qwen3-vl-235b-a22b-instruct"
+        self.model = "nvidia/nemotron-nano-12b-v2-vl"
         self.save_screenshots = os.getenv("SAVE_SCREENSHOTS", "false").lower() == "true"
         
         # Create screenshots directory if saving is enabled

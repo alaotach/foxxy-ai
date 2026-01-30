@@ -245,6 +245,37 @@ Return ONLY valid JSON (no escaped apostrophes in strings)."""
                 
                 # Parse directly
                 decision = json.loads(json_str)
+                
+                # CRITICAL FIX: If action is vision_click, resolve coordinates NOW
+                if decision.get("next_action") and decision["next_action"].get("type") == "vision_click":
+                    description = decision["next_action"].get("description")
+                    if description and screenshot:
+                        print(f"🔍 Resolving coordinates for vision_click: {description}")
+                        vision = VisionAutomation(provider="hackclub")
+                        
+                        # Get viewport dimensions from request or use defaults
+                        vp_width = viewport.get("width", 1920)
+                        vp_height = viewport.get("height", 1080)
+                        
+                        # Find element coordinates
+                        coords = vision.find_element_coordinates(
+                            screenshot,
+                            description,
+                            vp_width,
+                            vp_height
+                        )
+                        
+                        if coords:
+                            # Add coordinates to the action
+                            decision["next_action"]["x"] = coords[0]
+                            decision["next_action"]["y"] = coords[1]
+                            print(f"✅ Coordinates resolved: ({coords[0]}, {coords[1]})")
+                        else:
+                            print(f"⚠️ Could not find element: {description}")
+                            # Keep action but note coordinates missing
+                            decision["next_action"]["x"] = None
+                            decision["next_action"]["y"] = None
+                
                 return decision
             except json.JSONDecodeError as je:
                 print(f"❌ JSON parse error: {je}")

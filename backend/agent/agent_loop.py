@@ -75,6 +75,11 @@ class AgentLoop:
         self.execution_state = "planning"
         
         try:
+            # Send message to show automation aura
+            await self.websocket_manager.send_to_extension({
+                "action": "startAutomation"
+            })
+            
             # Step 1: Planning phase
             yield {
                 "type": "status",
@@ -130,6 +135,11 @@ class AgentLoop:
             # Step 3: Completion
             self.execution_state = "completed"
             
+            # Hide automation aura
+            await self.websocket_manager.send_to_extension({
+                "action": "stopAutomation"
+            })
+            
             yield {
                 "type": "task_complete",
                 "task_id": task_id,
@@ -139,6 +149,11 @@ class AgentLoop:
             
         except Exception as e:
             self.execution_state = "failed"
+            
+            # Hide automation aura on error too
+            await self.websocket_manager.send_to_extension({
+                "action": "stopAutomation"
+            })
             
             yield {
                 "type": "error",
@@ -205,6 +220,7 @@ class AgentLoop:
             "params": params,
             "duration_ms": 0
         }
+
     
     async def execute_with_reflection(
         self,

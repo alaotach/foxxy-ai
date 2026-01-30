@@ -3,7 +3,12 @@ const BACKEND_URL = 'http://localhost:8000';
 
 let promptInput;
 let executeBtn;
-let progressSection;
+let taskTitle;
+let emptyState;
+let thinkingStatus;
+let stepsList;
+let screenshotPreview;
+let mainContent;
 
 let currentSteps = [];
 let isExecuting = false;
@@ -12,14 +17,17 @@ let lastScreenshot = null;
 document.addEventListener('DOMContentLoaded', () => {
   promptInput = document.getElementById('promptInput');
   executeBtn = document.getElementById('executeBtn');
-  progressSection = document.getElementById('progressSection');
+  taskTitle = document.getElementById('taskTitle');
+  emptyState = document.getElementById('emptyState');
+  thinkingStatus = document.getElementById('thinkingStatus');
+  stepsList = document.getElementById('stepsList');
+  screenshotPreview = document.getElementById('screenshotPreview');
+  mainContent = document.getElementById('mainContent');
 
-  if (!promptInput || !executeBtn || !progressSection) {
-    // If these aren't found, the HTML isn't the assistant UI.
-    // Provide a visible failure mode instead of relying on console logs.
+  if (!promptInput || !executeBtn) {
     if (document.body) {
       const msg = document.createElement('div');
-      msg.style.cssText = 'padding:12px;color:#fca5a5;font-size:12px;';
+      msg.style.cssText = 'padding:12px;color:#ff6b6b;font-size:12px;';
       msg.textContent = 'Foxy AI UI failed to initialize (missing elements).';
       document.body.prepend(msg);
     }
@@ -45,8 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     isExecuting = true;
     executeBtn.disabled = true;
-    const originalText = executeBtn.textContent;
-    executeBtn.textContent = 'Running…';
 
     try {
       await runAutomation(prompt);
@@ -55,18 +61,34 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       isExecuting = false;
       executeBtn.disabled = false;
-      executeBtn.textContent = originalText;
     }
   });
 
   promptInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') executeBtn.click();
   });
+
+  // Update send button style based on input
+  promptInput.addEventListener('input', () => {
+    if (promptInput.value.trim()) {
+      executeBtn.classList.add('active');
+    } else {
+      executeBtn.classList.remove('active');
+    }
+  });
 });
 
 async function runAutomation(prompt) {
-  // Clear previous results
-  progressSection.innerHTML = '';
+  // Update task title
+  taskTitle.textContent = prompt;
+  
+  // Hide empty state, show thinking
+  emptyState.style.display = 'none';
+  thinkingStatus.classList.add('active');
+  stepsList.classList.remove('active');
+  
+  // Clear previous steps
+  stepsList.innerHTML = '';
   currentSteps = [];
   lastScreenshot = null;
   
@@ -75,11 +97,35 @@ async function runAutomation(prompt) {
 }
 
 async function runAutonomousAgent(goal) {
-  addStep('init', `🎯 Goal: ${goal}`, 'active');
+  // Show thinking status
+  thinkingStatus.classList.add('active');
   await sleep(500);
-  updateStep('init', `🎯 Goal: ${goal}`, 'completed');
+  
+  // Hide thinking, show steps
+  thinkingStatus.classList.remove('active');
+  stepsList.classList.add('active');
+  
+  addStep('prepare', 'Preparing to assist you', 'active');
+  await sleep(300);
+  updateStep('prepare', 'Preparing to assist you', 'completed');
   
   let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  
+  // Ensure vision-content.js is loaded first
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['vision-content.js']
+    });
+    await sleep(300);
+  } catch (e) {
+    console.log('Vision content script already loaded or failed:', e.message);
+  }
+  
+  // Show automation aura
+  await chrome.tabs.sendMessage(tab.id, { action: 'startAutomation' }).catch((err) => {
+    console.log('Could not show aura:', err.message);
+  });
   
   const history = [];
   let stepCount = 0;
@@ -128,12 +174,16 @@ async function runAutonomousAgent(goal) {
     // Check if completed
     if (decision.completed) {
       addStep('done', '✅ Task completed!', 'completed');
+      // Hide automation aura
+      await chrome.tabs.sendMessage(tab.id, { action: 'stopAutomation' }).catch(() => {});
       break;
     }
     
     // Execute next action
     if (!decision.next_action) {
       addStep('error', '❌ Agent got stuck', 'failed');
+      // Hide automation aura
+      await chrome.tabs.sendMessage(tab.id, { action: 'stopAutomation' }).catch(() => {});
       break;
     }
     
@@ -222,6 +272,9 @@ async function runAutonomousAgent(goal) {
     }
   }
   
+  // Hide automation aura when done
+  await chrome.tabs.sendMessage(tab.id, { action: 'stopAutomation' }).catch(() => {});
+  
   if (stepCount >= maxSteps) {
     addStep('limit', '⚠️ Reached step limit', 'failed');
   }
@@ -230,19 +283,19 @@ async function runAutonomousAgent(goal) {
 function getStepTitle(step) {
   switch(step.type) {
     case 'navigate':
-      return `Navigating to ${step.url}`;
+      return `Reading page`;
     case 'vision_click':
       return `Clicking ${step.description || 'element'}`;
     case 'type':
-      return `Typing: ${step.text}`;
+      return `Typing text`;
     case 'scroll':
-      return `Scrolling ${step.amount || 500}px`;
+      return `Scrolling page`;
     case 'wait':
       return `Waiting for page to load`;
     case 'screenshot':
-      return 'Taking screenshot';
+      return 'Taking screenshot of page';
     case 'prompt_user':
-      return `❓ ${step.prompt || 'Requesting user input'}`;
+      return step.prompt || 'Requesting user input';
     default:
       return step.type;
   }
@@ -253,25 +306,17 @@ function addStep(id, title, status, screenshot = null) {
   stepDiv.className = `step-item ${status}`;
   stepDiv.id = `step-${id}`;
   
-  const icon = status === 'active' ? '<span class="loader"></span>' :
-               status === 'completed' ? '✓' :
-               status === 'failed' ? '✗' : '○';
+  stepDiv.innerHTML = `
+    <div class="step-bullet"></div>
+    <div class="step-text">${title}</div>
+  `;
   
-  let html = `<div class="step-title">${icon} ${title}</div>`;
+  stepsList.appendChild(stepDiv);
+  mainContent.scrollTop = mainContent.scrollHeight;
   
   if (screenshot) {
-    html += `
-      <div class="screenshot-container">
-        <img src="${screenshot}" class="step-screenshot" alt="Screenshot" onclick="window.open(this.src, '_blank')" style="cursor: pointer;">
-        <div class="screenshot-label">Click to view full size</div>
-      </div>
-    `;
+    updateScreenshot(screenshot);
   }
-  
-  stepDiv.innerHTML = html;
-  
-  progressSection.appendChild(stepDiv);
-  progressSection.scrollTop = progressSection.scrollHeight;
 }
 
 function updateStep(id, title, status, screenshot = null) {
@@ -279,27 +324,24 @@ function updateStep(id, title, status, screenshot = null) {
   if (!stepDiv) return;
   
   stepDiv.className = `step-item ${status}`;
+  stepDiv.querySelector('.step-text').textContent = title;
   
-  const icon = status === 'active' ? '<span class="loader"></span>' :
-               status === 'completed' ? '✓' :
-               status === 'failed' ? '✗' : '○';
-  
-  let html = `<div class="step-title">${icon} ${title}</div>`;
+  mainContent.scrollTop = mainContent.scrollHeight;
   
   if (screenshot) {
-    html += `
-      <div class="screenshot-container">
-        <img src="${screenshot}" class="step-screenshot" alt="Screenshot" onclick="window.open(this.src, '_blank')" style="cursor: pointer;">
-        <div class="screenshot-label">Click to view full size</div>
-      </div>
-    `;
+    updateScreenshot(screenshot);
   }
-  
-  stepDiv.innerHTML = html;
-  progressSection.scrollTop = progressSection.scrollHeight;
+}
+
+function updateScreenshot(screenshot) {
+  const img = document.getElementById('screenshotImg');
+  img.src = screenshot;
+  screenshotPreview.classList.add('active');
 }
 
 function showError(message) {
+  thinkingStatus.classList.remove('active');
+  stepsList.classList.add('active');
   addStep('error', `Error: ${message}`, 'failed');
 }
 
