@@ -19,7 +19,8 @@ class PureVisionAgent:
     
     def __init__(self):
         self.api_key = os.getenv("HACKCLUB_API_KEY")
-        self.model = "nvidia/nemotron-nano-12b-v2-vl"
+        # SPEED OPTIMIZATION: Use Gemini 2.5 Flash (ultra-fast vision model)
+        self.model = os.getenv("VISION_MODEL", "google/gemini-2.5-flash")
         self.save_screenshots = os.getenv("SAVE_SCREENSHOTS", "false").lower() == "true"
         
         # Create screenshots directory if saving is enabled
@@ -114,10 +115,14 @@ IMPORTANT RULES:
 
 AVAILABLE ACTIONS:
 1. Click: {{"action": "click", "x": 340, "y": 280, "reasoning": "Clicked blue button at grid X:300-400, Y:250-300"}}
-2. Type: {{"action": "type", "text": "Valentine's Day", "reasoning": "Typed search query"}}
+2. Type (at input coordinates): {{"action": "type", "x": 340, "y": 280, "text": "Valentine's Day", "reasoning": "Typing into search input at coordinates"}}
 3. Scroll: {{"action": "scroll", "amount": 500, "reasoning": "Scrolling down to see more templates"}}
 4. Wait: {{"action": "wait", "duration": 2000, "reasoning": "Waiting for page to load"}}
 5. Done: {{"action": "done", "reasoning": "Task completed successfully"}}
+
+IMPORTANT FOR TYPE ACTION:
+- MUST include x,y coordinates of the input field center
+- Will use coordinate-based input setter (more reliable than focus/click)
 
 TASK ANALYSIS:
 - Look at the screenshot carefully

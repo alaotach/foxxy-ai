@@ -15,7 +15,8 @@ class VisionAutomation:
     def __init__(self, provider: str = "hackclub"):
         self.provider = provider
         self.api_key = os.getenv("HACKCLUB_API_KEY")
-        self.model = "nvidia/nemotron-nano-12b-v2-vl"
+        # SPEED OPTIMIZATION: Use Gemini 2.5 Flash (ultra-fast vision model)
+        self.model = os.getenv("VISION_MODEL", "google/gemini-2.5-flash")
         self.save_screenshots = os.getenv("SAVE_SCREENSHOTS", "false").lower() == "true"
         
         # Create screenshots directory if saving is enabled
@@ -26,7 +27,7 @@ class VisionAutomation:
     def add_grid_overlay(
         self, 
         screenshot_base64: str, 
-        grid_spacing: int = 50
+        grid_spacing: int = 100
     ) -> Tuple[str, int, int]:
         """Add numbered grid overlay to screenshot for precise coordinate reference
         
@@ -48,25 +49,33 @@ class VisionAutomation:
             
             # Try to load a font, fallback to default if not available
             try:
-                font = ImageFont.truetype("arial.ttf", 14)
+                font = ImageFont.truetype("arial.ttf", 16)
+                small_font = ImageFont.truetype("arial.ttf", 12)
             except:
                 font = ImageFont.load_default()
+                small_font = font
             
             # Draw vertical grid lines (X-axis)
             for x in range(0, width, grid_spacing):
                 # Draw line
-                draw.line([(x, 0), (x, height)], fill=(255, 0, 0, 128), width=1)
-                # Draw X coordinate label at top
+                draw.line([(x, 0), (x, height)], fill=(255, 0, 0, 180), width=2)
+                # Draw X coordinate label at top with background for visibility
                 label = str(x)
-                draw.text((x + 2, 2), label, fill=(255, 0, 0), font=font)
+                # Background rectangle for label
+                bbox = draw.textbbox((x + 4, 4), label, font=font)
+                draw.rectangle(bbox, fill=(0, 0, 0, 200))
+                draw.text((x + 4, 4), label, fill=(255, 50, 50), font=font)
             
             # Draw horizontal grid lines (Y-axis)
             for y in range(0, height, grid_spacing):
                 # Draw line
-                draw.line([(0, y), (width, y)], fill=(0, 255, 0, 128), width=1)
-                # Draw Y coordinate label at left
+                draw.line([(0, y), (width, y)], fill=(0, 255, 0, 180), width=2)
+                # Draw Y coordinate label at left with background for visibility
                 label = str(y)
-                draw.text((2, y + 2), label, fill=(0, 255, 0), font=font)
+                # Background rectangle for label
+                bbox = draw.textbbox((4, y + 4), label, font=font)
+                draw.rectangle(bbox, fill=(0, 0, 0, 200))
+                draw.text((4, y + 4), label, fill=(50, 255, 50), font=font)
             
             # Add corner label showing dimensions
             dim_label = f"{width}x{height}"
@@ -92,66 +101,162 @@ class VisionAutomation:
             print(f"⚠️ Grid overlay failed: {e}, using original image")
             # Return original if grid fails
             img_data = base64.b64decode(screenshot_base64)
+    def compress_screenshot(
+        self,
+        screenshot_base64: str,
+        max_width: int = 640,
+        max_height: int = 480
+    ) -> Tuple[str, int, int]:
+        """Compress screenshot to reduce API latency without losing critical details
+        
+        Args:
+            screenshot_base64: Original screenshot
+            max_width: Maximum width (default: 640px - sufficient for vision models)
+            max_height: Maximum height (default: 480px)
+            
+        Returns:
+            Tuple of (compressed_base64, original_width, original_height)
+        """
+        try:
+            img_data = base64.b64decode(screenshot_base64)
             img = Image.open(io.BytesIO(img_data))
-            return screenshot_base64, img.size[0], img.size[1]
+            original_width, original_height = img.size
+            
+            # Skip compression if already small
+            if original_width <= max_width and original_height <= max_height:
+                return screenshot_base64, original_width, original_height
+            
+            # Calculate aspect ratio preserving resize
+            aspect_ratio = original_width / original_height
+            if aspect_ratio > max_width / max_height:
+                # Width is limiting factor
+                new_width = max_width
+                new_height = int(max_width / aspect_ratio)
+            else:
+                # Height is limiting factor
+                new_height = max_height
+                new_width = int(max_height * aspect_ratio)
+            
+            # Resize with high-quality downsampling
+            img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Encode to base64
+            buffer = io.BytesIO()
+            img_resized.save(buffer, format='PNG', optimize=True)
+            compressed = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            compression_ratio = len(screenshot_base64) / len(compressed)
+            print(f"📦 Screenshot compressed: {original_width}x{original_height} → {new_width}x{new_height} ({compression_ratio:.1f}x smaller)")
+            
+            return compressed, original_width, original_height
+            
+        except Exception as e:
+            print(f"⚠️ Screenshot compression failed: {e}, using original")
+            return screenshot_base64, 0, 0
     
     def find_element_coordinates(
         self, 
-        screenshot_base64: str, 
+        screenshot_base64: str,
         description: str,
         viewport_width: int = 1920,
         viewport_height: int = 1080
     ) -> Optional[Tuple[int, int]]:
-        """Find coordinates of an element in a screenshot using vision AI"""
+        """Find coordinates of an element in a screenshot using vision AI
         
-        # Add grid overlay for precise coordinates
-        grid_screenshot, actual_width, actual_height = self.add_grid_overlay(screenshot_base64)
-        viewport_width = actual_width
-        viewport_height = actual_height
+        No resizing - uses original screenshot for maximum accuracy
+        """
         
-        prompt = f"""You are a precision web automation assistant analyzing a webpage screenshot with coordinate grid.
+        # Add grid overlay directly to original screenshot (no resizing)
+        grid_screenshot, grid_width, grid_height = self.add_grid_overlay(screenshot_base64, grid_spacing=50)
+        viewport_width = grid_width
+        viewport_height = grid_height
+        
+        print(f"📐 Viewport: {viewport_width}x{viewport_height}")
+        
+        prompt = f"""You are a HIGHLY PRECISE web automation assistant. You analyze screenshots with coordinate grids to find elements.
 
-COORDINATE GRID:
-- RED vertical lines = X-axis (labeled with X coordinates every 100px)
-- GREEN horizontal lines = Y-axis (labeled with Y coordinates every 100px)
-- Image dimensions: {viewport_width}x{viewport_height} pixels
-- USE THE GRID NUMBERS to determine exact coordinates
+COORDINATE GRID SYSTEM:
+- RED vertical lines = X-axis (numbers at top show X coordinates)
+- GREEN horizontal lines = Y-axis (numbers at left show Y coordinates)  
+- Image size: {viewport_width}x{viewport_height} pixels
+- Grid spacing: 50 pixels (labeled every 50px for high precision)
+- CRITICAL: The numbers on the grid ARE the exact coordinates - read them directly!
 
-TASK: Find and locate "{description}"
+YOUR TASK: Find "{description}" and return its CENTER coordinates
 
-VISUAL ANALYSIS GUIDE:
-1. Input Fields/Textboxes: White or light-colored rectangles with borders, often with placeholder text
-   - Look for comment boxes, search bars, text areas
-   - YouTube comment: usually says "Add a comment..." or "Add a public comment..."
-   - Click the CENTER of the input field
-2. Templates/Cards: Large rectangular areas with images/thumbnails (usually 200-400px wide)
-   - Click the CENTER of the card/thumbnail image
-3. Buttons: Colored rectangles with text (usually <150px wide)
-   - Common colors: blue, green, orange, white with borders
-   - Click the center of the button
-4. Links: Underlined or colored text (smaller than buttons)
-5. Icons: Small circular or square graphics (20-60px)
+CRITICAL: IGNORE COLORS - Focus ONLY on:
+- Text labels (e.g., "Subscribe", "Login", "Search")
+- Element shape and size
+- Element position relative to other elements
+- Icons and symbols
 
-COORDINATE PRECISION:
-- Count grid lines to determine exact position
-- Red numbers (top) = X coordinate
-- Green numbers (left) = Y coordinate
-- Return the GEOMETRIC CENTER of the element
-- For element between X:200-300 and Y:300-400 → return {{"x": 250, "y": 350}}
+ELEMENT IDENTIFICATION:
+1. **Buttons**: Rectangular clickable areas with text labels
+   - Look ONLY for the text (e.g., "Subscribe", "Login", "Sign in", "Create")
+   - Ignore button color completely - it can be red, white, blue, gray, anything
+   - Return CENTER of button
 
-RESPOND WITH VALID JSON ONLY:
+2. **Search Inputs**: Rectangular boxes with "Search" text or magnifying glass icon
+   - Usually 300-600px wide, 40-60px tall
+   - Return CENTER of the input box
+
+3. **Video Thumbnails**: Large rectangular images with titles below
+   - ~200-400px wide thumbnails in grid layout
+   - First video = top-left thumbnail in results
+   - Return CENTER of thumbnail image (not title text)
+
+4. **Input Fields**: Text entry areas
+   - Comment boxes: "Add a comment..." placeholder
+   - Search bars: Magnifying glass icon + input field
+   - Return CENTER of input area
+
+5. **Links/Text**: Text elements that are clickable
+   - Navigation links, menu items
+   - Return CENTER of text
+
+COORDINATE PRECISION RULES:
+1. The RED numbers at the top are X coordinates (horizontal position)
+2. The GREEN numbers on the left are Y coordinates (vertical position)  
+3. Grid lines are spaced 50 pixels apart
+4. To find an element's position:
+   - Find which RED vertical lines it's between (left edge and right edge)
+   - Find which GREEN horizontal lines it's between (top edge and bottom edge)
+   - Calculate the CENTER: (left+right)/2, (top+bottom)/2
+5. Example: Button between red lines 300-500, green lines 400-500 → center is (400, 450)
+6. Use geometric CENTER, not corners
+7. Coordinates MUST be within 0-{viewport_width} for X, 0-{viewport_height} for Y
+
+HOW TO READ THE GRID:
+- Each grid line shows its pixel coordinate
+- Between line 300 and line 400 = pixels 300-400
+- An element's center between 300 and 400 could be 350
+- Count the labeled numbers, don't estimate between unlabeled areas
+
+VISUAL SEARCH STRATEGY:
+- Scan the screenshot systematically
+- Match description keywords to visual elements
+- Use grid lines to measure exact position
+- Verify element is fully visible (not cut off at edges)
+
+RESPOND WITH VALID JSON ONLY (keep reasoning brief):
 {{
   "x": 340,
   "y": 280,
-  "reasoning": "Found blue 'Create' button centered between X:300-400 and Y:260-300 grid lines"
+  "element_type": "button|input|link|thumbnail|icon",
+  "confidence": "high|medium|low",
+  "reasoning": "Red Subscribe button at grid X:300-380, Y:260-300, center (340, 280)"
 }}
 
-If not found:
+If element is NOT visible:
 {{
   "x": null,
   "y": null,
-  "reasoning": "No matching element visible in current view"
-}}"""
+  "element_type": "unknown",
+  "confidence": "none",
+  "reasoning": "Not found"
+}}
+
+IMPORTANT: Keep reasoning SHORT (under 100 characters) to avoid truncation."""
         
         try:
             print(f"🤖 Calling vision model: {self.model}")
@@ -165,6 +270,8 @@ If not found:
                 },
                 json={
                     "model": self.model,
+                    "temperature": 0.1,  # Lower = faster, more deterministic
+                    "max_tokens": 150,   # Limit response length for speed
                     "messages": [{
                         "role": "user",
                         "content": [
@@ -182,28 +289,53 @@ If not found:
             
             result = response.json()
             result_text = result["choices"][0]["message"]["content"]
-            print(f"🔍 AI Response: {result_text}")
+            print(f"🔍 AI Response: {result_text[:500]}...")  # Truncate long responses in log
             
             # Parse JSON response - handle malformed responses
             json_start = result_text.find('{')
             json_end = result_text.rfind('}') + 1
+            
             if json_start >= 0 and json_end > json_start:
                 json_text = result_text[json_start:json_end]
+                
+                # Fix truncated reasoning field (common issue with long responses)
+                # If reasoning field is open but not closed, close it
+                if '"reasoning":' in json_text and json_text.count('"reasoning":') > json_text.count('"reasoning": "'):
+                    # Find last quote and add closing
+                    last_quote = json_text.rfind('"')
+                    if last_quote > 0 and not json_text[last_quote:].strip().startswith('"}'):
+                        json_text = json_text[:last_quote+1] + '"}'
+                
                 # Fix common AI mistakes
                 json_text = json_text.replace('"x":', '"x":').replace('"y":', '"y":')
                 # Fix missing "y" key when AI writes "x": 340, 917,
                 import re
                 json_text = re.sub(r'"x"\s*:\s*(\d+)\s*,\s*(\d+)\s*,', r'"x": \1, "y": \2,', json_text)
-                result = json.loads(json_text)
+                
+                try:
+                    result = json.loads(json_text)
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ JSON parse error: {e}")
+                    print(f"📝 Attempted to parse: {json_text[:200]}...")
+                    # Return not found if we can't parse
+                    return None
             else:
-                result = json.loads(result_text)
+                try:
+                    result = json.loads(result_text)
+                except json.JSONDecodeError:
+                    print(f"⚠️ No valid JSON found in response")
+                    return None
             
             if result.get("x") and result.get("y"):
+                # No scaling needed - coordinates are already in original viewport size
+                x = result["x"]
+                y = result["y"]
+                
                 confidence = result.get('confidence', 'unknown')
                 element_type = result.get('element_type', 'unknown')
-                print(f"✅ Found {element_type} at ({result['x']}, {result['y']}) - confidence: {confidence}")
-                print(f"   Reasoning: {result.get('reasoning', 'N/A')}")
-                return (result["x"], result["y"])
+                print(f"✅ Found {element_type} at ({x}, {y})")
+                print(f"   Confidence: {confidence} | {result.get('reasoning', 'N/A')}")
+                return (x, y)
             else:
                 print(f"❌ Not found - {result.get('reasoning')}")
                 return None

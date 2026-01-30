@@ -7,13 +7,16 @@ const BACKEND_URL = 'http://localhost:8000';
 // Handle screenshot capture requests
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'captureScreenshot') {
-    // Capture visible tab screenshot
-    chrome.tabs.captureVisibleTab(null, { format: 'png' }).then(dataUrl => {
-      sendResponse({ screenshot: dataUrl });
-    }).catch(error => {
-      console.error('Screenshot capture failed:', error);
-      sendResponse({ screenshot: null, error: error.message });
-    });
+    // Wait 2 seconds before capturing screenshot
+    setTimeout(() => {
+      // Capture visible tab screenshot
+      chrome.tabs.captureVisibleTab(null, { format: 'png' }).then(dataUrl => {
+        sendResponse({ screenshot: dataUrl });
+      }).catch(error => {
+        console.error('Screenshot capture failed:', error);
+        sendResponse({ screenshot: null, error: error.message });
+      });
+    }, 2000);
     return true; // Async response
   }
   

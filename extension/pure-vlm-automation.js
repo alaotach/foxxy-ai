@@ -5,6 +5,10 @@ console.log('🎯 Pure VLM Automation loaded');
 
 const BACKEND_URL = 'http://localhost:8000';
 
+const PAGE_STABLE_QUIET_MS = 600;
+const PAGE_STABLE_TIMEOUT_MS = 8000;
+const POST_THINKING_DELAY_MS = 500;
+
 // Capture screenshot
 async function captureScreenshot() {
   return new Promise((resolve) => {
@@ -28,7 +32,12 @@ async function executeAction(action) {
       break;
       
     case 'type':
-      await typeText(action.text);
+      // Use coordinate-based typing if coordinates provided
+      if (action.x !== undefined && action.y !== undefined) {
+        await typeAtCoordinates(action.x, action.y, action.text);
+      } else {
+        await typeText(action.text);
+      }
       break;
       
     case 'scroll':
@@ -139,7 +148,56 @@ async function clickAt(x, y) {
   await sleep(1000);
 }
 
-// Type text (finds focused element or active input)
+// Type at specific coordinates using proper input setter (more reliable)
+async function typeAtCoordinates(x, y, text) {
+  console.log(`⌨️ Typing at coordinates (${x}, ${y}): "${text}"`);
+  
+  try {
+    const i = document.elementFromPoint(x, y);
+    
+    if (!i) {
+      console.warn('⚠️ No element at coordinates');
+      return;
+    }
+    
+    if (i.tagName === 'INPUT' || i.tagName === 'TEXTAREA') {
+      // Use proper HTMLInputElement/HTMLTextAreaElement prototype setter
+      const proto = i.tagName === 'INPUT' ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const valueSetter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      
+      // Set value using prototype setter (bypasses any custom setters)
+      valueSetter.call(i, text);
+      
+      // Focus the input
+      i.focus();
+      
+      // Set cursor to end of text
+      if (i.setSelectionRange) {
+        i.setSelectionRange(i.value.length, i.value.length);
+      }
+      
+      // Dispatch events to trigger any React/Vue listeners
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      i.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      console.log(`✅ Typed into ${i.tagName}: "${text}"`);
+    } else if (i.contentEditable === 'true') {
+      // ContentEditable element
+      i.textContent = text;
+      i.focus();
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log(`✅ Typed into contentEditable: "${text}"`);
+    } else {
+      console.warn(`⚠️ Element at coordinates is not an input (${i.tagName})`);
+    }
+  } catch (error) {
+    console.error('❌ Type at coordinates failed:', error);
+  }
+  
+  await sleep(500);
+}
+
+// Type text (fallback - finds focused element or active input)
 async function typeText(text) {
   const activeEl = document.activeElement;
   
@@ -163,6 +221,51 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Wait for DOM to stop changing (MutationObserver)
+async function waitForPageStable({ quietMs = PAGE_STABLE_QUIET_MS, timeoutMs = PAGE_STABLE_TIMEOUT_MS } = {}) {
+  const target = document.documentElement || document.body;
+  if (!target) {
+    await sleep(quietMs);
+    return;
+  }
+
+  return new Promise((resolve) => {
+    let quietTimer = null;
+    let timedOut = false;
+
+    const done = () => {
+      if (quietTimer) clearTimeout(quietTimer);
+      observer.disconnect();
+      resolve();
+    };
+
+    const onQuiet = () => {
+      if (!timedOut) done();
+    };
+
+    const observer = new MutationObserver(() => {
+      if (quietTimer) clearTimeout(quietTimer);
+      quietTimer = setTimeout(onQuiet, quietMs);
+    });
+
+    observer.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    });
+
+    // Start quiet timer immediately in case page is already stable
+    quietTimer = setTimeout(onQuiet, quietMs);
+
+    // Hard timeout fallback
+    setTimeout(() => {
+      timedOut = true;
+      done();
+    }, timeoutMs);
+  });
+}
+
 // Main automation loop
 async function runPureVLMAutomation(goal) {
   console.log('🚀 Starting Pure VLM Automation');
@@ -174,6 +277,9 @@ async function runPureVLMAutomation(goal) {
   while (step < maxSteps) {
     step++;
     console.log(`\n⏳ Step ${step}/${maxSteps}`);
+
+    // Wait for page to settle before taking screenshot
+    await waitForPageStable();
     
     // Capture current page
     const screenshot = await captureScreenshot();
@@ -210,6 +316,10 @@ async function runPureVLMAutomation(goal) {
       
       // Execute the action
       await executeAction(action);
+
+      // Wait for page changes to settle before next screenshot
+      await waitForPageStable();
+      await sleep(POST_THINKING_DELAY_MS);
       
       // Wait between actions
       await sleep(2000);

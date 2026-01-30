@@ -3,6 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    :root {
+      --bg-color: #1a1a1a;
+      --chat-bg: #1a1a1a;
+      --input-bg: #2a2a2a;
+      --text-primary: #e0e0e0;
+      --text-secondary: #a0a0a0;
+      --accent-color: #ED4A14;
+      --accent-hover: #ff5a1f;
+      --user-msg-bg: #2a2a2a;
+      --assistant-msg-bg: #1e1e1e;
+      --border-color: #333333;
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -13,323 +26,310 @@
       width: 100%;
       height: 100vh;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #1a1a1a;
-      color: #e0e0e0;
+      background: var(--bg-color);
+      color: var(--text-primary);
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
-    /* Top Section: Task Title */
-    .task-header {
-      padding: 20px 24px;
+    /* Header */
+    .header {
+      padding: 16px;
       background: #212121;
-      border-bottom: 1px solid #2a2a2a;
-    }
-
-    .task-title {
-      font-size: 16px;
-      font-weight: 500;
-      color: #ffffff;
-      margin-bottom: 0;
-    }
-
-    /* Main Content Area */
-    .main-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 24px;
+      border-bottom: 1px solid var(--border-color);
       display: flex;
-      flex-direction: column;
-    }
-
-    /* Thinking Status */
-    .thinking-status {
-      display: none;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
-      color: #a0a0a0;
-      font-size: 14px;
-    }
-
-    .thinking-status.active {
-      display: flex;
-    }
-
-    .thinking-icon {
-      width: 20px;
-      height: 20px;
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(0.95); }
-    }
-
-    /* Steps List */
-    .steps-list {
-      display: none;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .steps-list.active {
-      display: flex;
-    }
-
-    .step-item {
-      display: flex;
-      align-items: flex-start;
       gap: 12px;
-      padding: 10px 0;
-      color: #a0a0a0;
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    .step-bullet {
-      width: 6px;
-      height: 6px;
-      background: #3a3a3a;
-      border-radius: 50%;
-      margin-top: 7px;
       flex-shrink: 0;
     }
 
-    .step-item.active .step-bullet {
-      background: #ED4A14;
-      box-shadow: 0 0 8px rgba(237, 74, 20, 0.4);
+    .logo {
+      font-size: 20px;
     }
 
-    .step-item.completed .step-bullet {
-      background: #4a4a4a;
+    .title {
+      font-weight: 600;
+      font-size: 16px;
     }
 
-    .step-item.active {
-      color: #ffffff;
+    /* Chat Area */
+    #chatContainer {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
     }
 
-    .step-item.completed {
-      color: #707070;
+    .message {
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: fadeIn 0.3s ease;
     }
 
-    /* Screenshot Preview */
-    .screenshot-preview {
-      margin-top: 16px;
-      border-radius: 8px;
-      overflow: hidden;
-      border: 1px solid #2a2a2a;
-      display: none;
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    .screenshot-preview.active {
-      display: block;
-    }
-
-    .screenshot-preview img {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    /* Bottom Input Section */
-    .input-section {
+    .message.user {
+      align-self: flex-end;
+      background: var(--user-msg-bg);
       padding: 12px 16px;
-      background: #1a1a1a;
-      border-top: 1px solid #2a2a2a;
+      border-radius: 12px 12px 0 12px;
+      max-width: 85%;
+      border: 1px solid var(--border-color);
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      width: 100%;
+      background: transparent;
+    }
+
+    .message-content {
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    /* Action Steps */
+    .action-step {
+      background: #252525;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    .action-step.active {
+      border-color: var(--accent-color);
+      border-left: 3px solid var(--accent-color);
+    }
+
+    .action-step.completed {
+      border-left: 3px solid #4CAF50;
+    }
+
+    .action-step.failed {
+      border-left: 3px solid #f44336;
+    }
+
+    .action-step-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+
+    /* Reasoning */
+    .reasoning-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .reasoning-text {
+      background: #1e1e1e;
+      border-left: 2px solid #666;
+      padding: 8px 12px;
+      color: #d0d0d0;
+      font-style: italic;
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 12px;
+    }
+
+    /* Images */
+    .screenshot-preview {
+      width: 100%;
+      border-radius: 6px;
+      margin-top: 8px;
+      border: 1px solid #444;
+      cursor: zoom-in;
+      transition: opacity 0.2s;
+    }
+
+    .screenshot-preview:hover {
+      opacity: 0.9;
+    }
+
+    /* Badges */
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .status-badge.success {
+      background: rgba(76, 175, 80, 0.2);
+      color: #81c784;
+    }
+
+    .status-badge.error {
+      background: rgba(244, 67, 54, 0.2);
+      color: #e57373;
+    }
+
+    /* Input Area */
+    .input-section {
+      padding: 16px;
+      background: #212121;
+      border-top: 1px solid var(--border-color);
     }
 
     .input-wrapper {
       display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .add-btn {
-      width: 32px;
-      height: 32px;
-      background: transparent;
-      border: none;
-      border-radius: 6px;
-      color: #707070;
-      font-size: 20px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .add-btn:hover {
-      background: #2a2a2a;
-      color: #a0a0a0;
+      gap: 10px;
+      position: relative;
     }
 
     .input-box {
       flex: 1;
-      background: transparent;
-      border: none;
-      padding: 8px 0;
-      color: #e0e0e0;
+      background: var(--input-bg);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px 40px 12px 14px;
+      color: white;
       font-size: 14px;
       outline: none;
+      transition: border-color 0.2s;
     }
 
-    .input-box::placeholder {
-      color: #505050;
-    }
-
-    .input-actions {
-      display: flex;
-      gap: 4px;
-      align-items: center;
-    }
-
-    .input-icon-btn {
-      width: 32px;
-      height: 32px;
-      background: transparent;
-      border: none;
-      border-radius: 6px;
-      color: #707070;
-      font-size: 16px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .input-icon-btn:hover {
-      background: #2a2a2a;
-      color: #a0a0a0;
+    .input-box:focus {
+      border-color: var(--accent-color);
     }
 
     .send-btn {
-      width: 32px;
-      height: 32px;
-      background: transparent;
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 28px;
+      height: 28px;
+      background: var(--accent-color);
       border: none;
       border-radius: 6px;
-      color: #707070;
-      font-size: 18px;
+      color: white;
       cursor: pointer;
-      transition: all 0.2s ease;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
+      transition: background 0.2s;
     }
 
     .send-btn:hover {
-      background: #2a2a2a;
-      color: #a0a0a0;
-    }
-
-    .send-btn.active {
-      background: #ED4A14;
-      color: white;
-    }
-
-    .send-btn.active:hover {
-      background: #ff5a1f;
+      background: var(--accent-hover);
     }
 
     .send-btn:disabled {
-      opacity: 0.4;
+      background: #444;
       cursor: not-allowed;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #444;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #555;
     }
 
     /* Empty State */
     .empty-state {
-      flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      height: 100%;
+      color: var(--text-secondary);
       text-align: center;
-      color: #606060;
-      gap: 12px;
+      padding: 0 40px;
+    }
+    
+    .empty-state h3 {
+      color: var(--text-primary);
+      margin: 10px 0 5px;
     }
 
-    .empty-state-icon {
-      font-size: 48px;
-      opacity: 0.6;
+    /* Thinking Animation */
+    .thinking-dots {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
     }
-
-    .empty-state-text {
-      font-size: 14px;
+    
+    .thinking-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--text-secondary);
+      border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out both;
     }
-
-    /* Custom Scrollbar */
-    .main-content::-webkit-scrollbar {
-      width: 8px;
+    
+    .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+    .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+    
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
     }
-
-    .main-content::-webkit-scrollbar-track {
-      background: #1a1a1a;
-    }
-
-    .main-content::-webkit-scrollbar-thumb {
-      background: #3a3a3a;
-      border-radius: 4px;
-    }
-
-    .main-content::-webkit-scrollbar-thumb:hover {
-      background: #4a4a4a;
+    
+    .thinking-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      padding: 8px 0;
     }
   </style>
 </head>
 <body>
-  <!-- Task Header -->
-  <div class="task-header">
-    <div class="task-title" id="taskTitle">Add details to this task...</div>
+  <div class="header">
+    <div class="logo"></div>
+    <div class="title">Foxy AI</div>
   </div>
 
-  <!-- Main Content -->
-  <div class="main-content" id="mainContent">
-    <!-- Empty State -->
-    <div class="empty-state" id="emptyState">
-      <div class="empty-state-icon">🦊</div>
-      <div class="empty-state-text">Tell me what to do and I'll automate it</div>
-    </div>
-
-    <!-- Thinking Status -->
-    <div class="thinking-status" id="thinkingStatus">
-      <img src="https://em-content.zobj.net/source/microsoft-teams/400/fox_1f98a.png" alt="🦊" class="thinking-icon">
-      <span>Thinking...</span>
-    </div>
-
-    <!-- Steps List -->
-    <div class="steps-list" id="stepsList">
-      <!-- Steps will be added dynamically -->
-    </div>
-
-    <!-- Screenshot Preview -->
-    <div class="screenshot-preview" id="screenshotPreview">
-      <img id="screenshotImg" src="" alt="Screenshot">
+  <div id="chatContainer">
+    <div class="empty-state">
+      <div style="font-size: 40px; margin-bottom: 20px;"></div>
+      <h3>How can I help you?</h3>
+      <p>I can automate tasks, answer questions, and navigate the web for you.</p>
     </div>
   </div>
 
-  <!-- Bottom Input -->
   <div class="input-section">
     <div class="input-wrapper">
-      <button class="add-btn">+</button>
       <input 
         type="text" 
         id="promptInput" 
         class="input-box"
-        placeholder="Add details to this task..."
+        placeholder="Type a task..."
         autocomplete="off"
       />
-      <div class="input-actions">
-        <button class="input-icon-btn" title="Voice input">🎤</button>
-        <button class="input-icon-btn" title="Attach file">📎</button>
-        <button id="executeBtn" class="send-btn">↑</button>
-      </div>
+      <button id="executeBtn" class="send-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
     </div>
   </div>
 

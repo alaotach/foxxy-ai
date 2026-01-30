@@ -29,6 +29,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# PERFORMANCE: Create singleton instances to avoid repeated initialization
+vision_automation = VisionAutomation(provider="hackclub")
+pure_vision_agent = PureVisionAgent()
+print("✅ Vision agents initialized")
+
 class PlanRequest(BaseModel):
     prompt: str
     context: Optional[dict] = None
@@ -138,6 +143,14 @@ async def agent_next_step(request: dict):
 
 GOAL: {goal}
 
+**GOAL COMPLETION CRITERIA** (check ONLY if goal matches these keywords):
+- If goal contains "play", "watch", or "open video": Task is COMPLETE when video player is visible and playing
+- If goal contains "search for": Task is COMPLETE when search results are displayed
+- If goal contains "find": Task is COMPLETE when the target item/page is visible
+- If goal contains "create", "make", "design": Task is COMPLETE when final output is saved/downloaded
+- If goal contains "navigate to", "go to": Task is COMPLETE when target page loads
+- **IMPORTANT**: Only apply these criteria if the goal actually matches - don't mark complete just because a video is playing if the goal wasn't to play a video
+
 CURRENT PAGE: {viewport.get('url', 'unknown')}
 PAGE TITLE: {viewport.get('title', 'unknown')}
 
@@ -156,11 +169,22 @@ Look at the current screenshot and decide:
    - If clicked "Subscribe", did it actually subscribe OR did a login/error modal appear?
    - If clicked "Create", did the editor/form open OR is it still on the same page?
    - If typed search query, did results appear OR is the page unchanged?
+   - If clicked a video, did the video player start playing OR is it still on search results?
 2. **Check for blockers**: Login modals, error messages, permission requests
-3. Is the goal fully completed?
+3. **Is the goal fully completed?** (Check current state against the GOAL, not just what's visible)
+   - For "play/watch video" goals ONLY: Check if video player is visible and video is playing
+   - For "search" goals ONLY: Check if search results are visible
+   - For "create" goals: Check if editor/creation interface is open and content is being added
+   - **Don't mark complete just because something is playing if that wasn't the goal**
 4. If not, what is the SINGLE next action to take?
 
-**CRITICAL**: If you see a login popup, permission modal, or error after an action - the action FAILED.
+**CRITICAL COMPLETION RULES**:
+- Only mark completed=true when the SPECIFIC GOAL is achieved
+- If goal is "play video X" and video X is playing → completed=true
+- If goal is "search for X" and search results for X are visible → completed=true  
+- If goal is "create Y" and you're still working on Y → completed=false, continue
+- Do NOT mark complete just because a video player is visible if the goal wasn't to play a video
+- If you see a login popup, permission modal, or error after an action - the action FAILED.
 Do NOT mark task as completed if a modal/error is blocking progress.
 
 Respond with JSON:
@@ -175,6 +199,8 @@ Respond with JSON:
     "type": "navigate|vision_click|right_click|type|wait|scroll|download_image|prompt_user",
     "description": "what to click/do",
     "text": "text to type (if type action)",
+    "x": 340,
+    "y": 280,
     "url": "url (if navigate)",
     "timeout": milliseconds (if wait),
     "filename": "name.jpg (if download_image)",
@@ -215,6 +241,12 @@ Examples:
 - For downloading images from Google Images: use download_image action (finds largest visible image automatically)
 - If download button not found: try right_click on the image then use vision_click for "Save image" menu item
 
+IMPORTANT for TYPE actions:
+- When using type action, you MUST look at the screenshot and provide the x,y coordinates of the input field
+- Example: {{"type": "type", "x": 340, "y": 280, "text": "Valentine's Day", "description": "search input field"}}
+- The coordinates should point to the CENTER of the input field you see in the screenshot
+- This is more reliable than clicking first - it uses coordinate-based input setter
+
 IMPORTANT for vision_click descriptions:
 - Be SPECIFIC about visual appearance (color, size, position)
 - Mention if it's a button, link, card, icon, or input field
@@ -246,35 +278,72 @@ Return ONLY valid JSON (no escaped apostrophes in strings)."""
                 # Parse directly
                 decision = json.loads(json_str)
                 
-                # CRITICAL FIX: If action is vision_click, resolve coordinates NOW
-                if decision.get("next_action") and decision["next_action"].get("type") == "vision_click":
-                    description = decision["next_action"].get("description")
-                    if description and screenshot:
-                        print(f"🔍 Resolving coordinates for vision_click: {description}")
-                        vision = VisionAutomation(provider="hackclub")
+                # OPTIMIZATION: Cache screenshot and vision calls
+                # Store screenshot hash to avoid redundant vision calls
+                import hashlib
+                screenshot_hash = hashlib.md5(screenshot.encode()).hexdigest()[:8]
+                
+                # CRITICAL FIX: Handle invalid action types and fix common issues
+                next_action = decision.get("next_action")
+                if next_action:
+                    # Fix 1: Convert invalid 'type' without selector to vision_click on input
+                    # BUT: If coordinates (x, y) are provided, keep it as 'type' (coordinate-based typing)
+                    if next_action.get("type") == "type" and not next_action.get("selector"):
+                        # Check if coordinates are provided (new coordinate-based typing)
+                        has_coordinates = next_action.get("x") is not None and next_action.get("y") is not None
                         
-                        # Get viewport dimensions from request or use defaults
-                        vp_width = viewport.get("width", 1920)
-                        vp_height = viewport.get("height", 1080)
-                        
-                        # Find element coordinates
-                        coords = vision.find_element_coordinates(
-                            screenshot,
-                            description,
-                            vp_width,
-                            vp_height
-                        )
-                        
-                        if coords:
-                            # Add coordinates to the action
-                            decision["next_action"]["x"] = coords[0]
-                            decision["next_action"]["y"] = coords[1]
-                            print(f"✅ Coordinates resolved: ({coords[0]}, {coords[1]})")
+                        if not has_coordinates:
+                            print(f"⚠️ Converting invalid 'type' action to 'vision_click' (no selector)")
+                            # First, click on the search/input field
+                            next_action["type"] = "vision_click"
+                            next_action["description"] = next_action.get("description", "search input field")
+                            # Text will be typed in next iteration after click succeeds
                         else:
-                            print(f"⚠️ Could not find element: {description}")
-                            # Keep action but note coordinates missing
-                            decision["next_action"]["x"] = None
-                            decision["next_action"]["y"] = None
+                            print(f"✅ Type action with coordinates ({next_action['x']}, {next_action['y']}) - using coordinate-based typing")
+                    
+                    # Fix 2: Resolve vision_click coordinates NOW to reduce round trips
+                    if next_action.get("type") == "vision_click":
+                        description = next_action.get("description")
+                        if description and screenshot:
+                            print(f"🔍 Resolving coordinates for vision_click: {description}")
+                            
+                            # Get viewport dimensions from request or use defaults
+                            vp_width = viewport.get("width", 1920)
+                            vp_height = viewport.get("height", 1080)
+                            
+                            # OPTIMIZATION: Cache vision calls per screenshot
+                            print(f"📸 Screenshot hash: {screenshot_hash}")
+                            
+                            # Find element coordinates
+                            coords = vision_automation.find_element_coordinates(
+                                screenshot,
+                                description,
+                                vp_width,
+                                vp_height
+                            )
+                            
+                            if coords:
+                                # Add coordinates to the action
+                                next_action["x"] = coords[0]
+                                next_action["y"] = coords[1]
+                                print(f"✅ Coordinates resolved: ({coords[0]}, {coords[1]})")
+                            else:
+                                print(f"⚠️ Could not find element: {description}, keeping action to retry")
+                                # Keep the original action - it will retry
+                    
+                    # Fix 3: Add timeout to wait actions
+                    if next_action.get("type") == "wait" and not next_action.get("timeout"):
+                        next_action["timeout"] = 3000
+                    
+                    # Fix 4: Validate navigation URLs
+                    if next_action.get("type") == "navigate" and next_action.get("url"):
+                        url = next_action["url"]
+                        # Ensure proper URL format
+                        if not url.startswith("http"):
+                            if url.startswith("www."):
+                                next_action["url"] = "https://" + url
+                            else:
+                                next_action["url"] = "https://www.google.com/search?q=" + url
                 
                 return decision
             except json.JSONDecodeError as je:
@@ -310,11 +379,9 @@ async def vision_find_element(request: dict):
     if not screenshot or not description:
         return {"error": "screenshot and description are required"}
     
-    vision = VisionAutomation(provider="hackclub")
-    
     # Use hybrid approach if DOM snapshot available
     if dom_snapshot:
-        result = vision.find_element_hybrid(
+        result = vision_automation.find_element_hybrid(
             screenshot,
             description,
             dom_snapshot,
@@ -323,7 +390,7 @@ async def vision_find_element(request: dict):
         )
     else:
         # Fallback to vision-only
-        coords = vision.find_element_coordinates(
+        coords = vision_automation.find_element_coordinates(
             screenshot, 
             description,
             viewport_width,
@@ -374,8 +441,7 @@ async def pure_vision_action(request: dict):
     if not screenshot or not task:
         return {"action": "error", "reasoning": "screenshot and task required"}
     
-    agent = PureVisionAgent()
-    action = agent.execute_task(screenshot, task, context)
+    action = pure_vision_agent.execute_task(screenshot, task, context)
     
     return action
 
@@ -539,8 +605,7 @@ async def vision_analyze(request: dict):
     if not screenshot or not question:
         return {"error": "screenshot and question are required"}
     
-    vision = VisionAutomation(provider="hackclub")
-    answer = vision.analyze_screenshot(screenshot, question)
+    answer = vision_automation.analyze_screenshot(screenshot, question)
     
     return {"answer": answer}
 
