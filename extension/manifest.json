@@ -1,48 +1,44 @@
 {
   "manifest_version": 3,
   "name": "Foxy AI",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered browser automation agent that works on your current page",
   "permissions": [
     "activeTab",
-    "scripting",
-    "storage"
+    "tabs",
+    "storage",
+    "webNavigation",
+    "downloads",
+    "scripting"
   ],
   "host_permissions": [
-    "http://localhost:8000/*",
     "<all_urls>"
   ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png"
-    }
-  },
-  "sidebar_action": {
-    "default_panel": "sidebar.html",
-    "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png"
+      "16": "icons/noFilter.webp",
+      "32": "icons/noFilter.webp",
+      "48": "icons/noFilter.webp"
     }
   },
   "background": {
-    "scripts": ["vision-background.js"]
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["vision-content.js"],
+      "js": [
+        "content.js"
+      ],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
   ],
   "icons": {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "16": "icons/noFilter.webp",
+    "32": "icons/noFilter.webp",
+    "48": "icons/noFilter.webp",
+    "128": "icons/noFilter.webp"
   }
 }

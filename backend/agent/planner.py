@@ -90,7 +90,13 @@ def plan_task(prompt: str, context: Dict[str, Any] = None) -> TaskPlan:
     # Add context to prompt if provided
     full_prompt = prompt
     if context:
-        full_prompt = f"{prompt}\n\nContext from previous attempt:\n{json.dumps(context, indent=2)}"
+        try:
+            # Safely serialize context, escaping any problematic characters
+            context_str = json.dumps(context, indent=2, ensure_ascii=True)
+            full_prompt = f"{prompt}\n\nContext from previous attempt:\n{context_str}"
+        except Exception as e:
+            print(f"⚠️ Failed to serialize context: {e}")
+            full_prompt = f"{prompt}\n\nContext: (serialization failed)"
     
     # Create the planning chain
     planning_chain = ChatPromptTemplate.from_template(PLANNING_PROMPT) | llm | JsonOutputParser()
@@ -146,3 +152,65 @@ def replan_with_feedback(
     }
     
     return plan_task(original_prompt, context=context)
+
+
+def plan_task_with_vision(prompt: str, screenshot_base64: str, viewport_info: dict, context: Any = None) -> TaskPlan:
+    """
+    Plan a task using vision - AI sees the screenshot and creates visual descriptions
+    instead of guessing CSS selectors
+    """
+    task_id = f"task-{uuid.uuid4().hex[:8]}"
+    
+    # Use LLM to create intelligent plan
+    llm = get_llm()
+    
+    planning_prompt = f"""You are a browser automation planner. Create a step-by-step plan for: "{prompt}"
+
+Current page: {viewport_info.get('url', 'unknown')}
+Current title: {viewport_info.get('title', 'unknown')}
+
+Rules:
+1. If the task requires a specific website (like Canva, YouTube, etc.) and we're not already there, add a navigate step first
+2. If you don't know the exact URL, add a navigate to https://www.google.com and then search for the website
+3. Use vision_click for all clicking (describe what to click, like "login button" or "create new presentation")
+4. Use type for entering text
+5. Add wait steps (1-2 seconds) after navigation or important actions
+6. The system will handle login screens automatically if vision sees them
+
+Available step types:
+- navigate: Go to URL
+- vision_click: Click element (describe it visually)
+- type: Type text into focused field
+- wait: Wait milliseconds
+- scroll: Scroll pixels
+
+Respond with JSON array of steps:
+[
+  {{"id": "step-1", "type": "navigate", "url": "https://www.canva.com"}},
+  {{"id": "step-2", "type": "wait", "timeout": 2000}},
+  {{"id": "step-3", "type": "vision_click", "description": "create button or plus icon"}},
+  {{"id": "step-4", "type": "vision_click", "description": "presentation template"}}
+]
+
+Return ONLY the JSON array, nothing else."""
+    
+    try:
+        response = llm.invoke(planning_prompt)
+        steps_json = response.content
+        
+        # Extract JSON array
+        import re
+        json_match = re.search(r'\[.*\]', steps_json, re.DOTALL)
+        if json_match:
+            steps_data = json.loads(json_match.group())
+            steps = [Step(**step) for step in steps_data]
+        else:
+            # Fallback to simple plan
+            steps = [Step(id="step-1", type="vision_click", description=prompt)]
+    except Exception as e:
+        print(f"Planning error: {e}, using fallback")
+        # Fallback simple plan
+        steps = [Step(id="step-1", type="vision_click", description=prompt)]
+    
+    return TaskPlan(task_id=task_id, steps=steps)
+
