@@ -4,8 +4,17 @@
 // - New tool registry: Available as window.toolRegistry with 30+ tools
 // - Both systems work together seamlessly!
 
-console.log('🦊 Foxy AI Hybrid Vision+DOM content script loaded');
-console.log('✨ Integrated with Tool Registry and WebSocket Manager');
+// Prevent double injection
+if (window.foxyAIContentScriptLoaded) {
+  console.log('⚠️ Foxy AI content script already loaded, skipping');
+} else {
+  window.foxyAIContentScriptLoaded = true;
+  
+  (function() {
+    'use strict';
+    
+    console.log('🦊 Foxy AI Hybrid Vision+DOM content script loaded');
+    console.log('✨ Integrated with Tool Registry and WebSocket Manager');
 
 const BACKEND_URL = 'http://localhost:8000';
 
@@ -534,7 +543,120 @@ async function executeStepVision(step) {
         // Type with aggressive input field detection
         const textToType = step.text || '';
         
-        // Strategy 1: Try to find input via hybrid vision+DOM
+        // Check if this is a simple "type into focused element" action (no selector/description)
+        const hasDescription = step.description || step.selector;
+        let activeEl = document.activeElement;
+        
+        console.log('🔍 Type action - hasDescription:', hasDescription, 'activeElement:', activeEl?.tagName);
+        console.log('🔍 Text to type:', textToType.substring(0, 50) + '...');
+        
+        // Strategy 0: If no description and element is already focused, just type directly
+        // Check main document first, then check iframes (for Google Docs)
+        let isContentEditable = false;
+        let targetDoc = document;
+        
+        console.log('🔍 Checking main document activeElement:', activeEl?.tagName, 'isContentEditable:', activeEl?.isContentEditable);
+        
+        if (!hasDescription) {
+          // Check if main document has focused editable element
+          if (activeEl && (
+            activeEl.tagName === 'INPUT' || 
+            activeEl.tagName === 'TEXTAREA' || 
+            activeEl.isContentEditable ||
+            activeEl.getAttribute('contenteditable') === 'true'
+          )) {
+            isContentEditable = true;
+            console.log('✅ Found focused editable element in main document');
+          } 
+          // Check iframes (Google Docs uses iframes)
+          else if (activeEl && activeEl.tagName === 'IFRAME') {
+            console.log('🔍 ActiveElement is IFRAME, checking inside...');
+            try {
+              const iframeDoc = activeEl.contentDocument || activeEl.contentWindow?.document;
+              if (iframeDoc) {
+                const iframeActive = iframeDoc.activeElement;
+                console.log('🔍 Checking iframe activeElement:', iframeActive?.tagName);
+                if (iframeActive && (
+                  iframeActive.tagName === 'INPUT' ||
+                  iframeActive.tagName === 'TEXTAREA' ||
+                  iframeActive.isContentEditable ||
+                  iframeActive.getAttribute('contenteditable') === 'true' ||
+                  iframeActive.tagName === 'BODY' // Google Docs canvas
+                )) {
+                  activeEl = iframeActive;
+                  targetDoc = iframeDoc;
+                  isContentEditable = true;
+                  console.log('✅ Found focused editable element in iframe');
+                }
+              }
+            } catch (e) {
+              console.log('⚠️ Cannot access iframe (cross-origin):', e.message);
+            }
+          }
+          // Try to find Google Docs canvas directly
+          else {
+            console.log('🔍 Searching for contenteditable iframes...');
+            const iframes = document.querySelectorAll('iframe');
+            console.log('🔍 Found', iframes.length, 'iframes');
+            for (const iframe of iframes) {
+              try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (iframeDoc) {
+                  const body = iframeDoc.body;
+                  if (body && (body.isContentEditable || body.getAttribute('contenteditable') === 'true')) {
+                    activeEl = body;
+                    targetDoc = iframeDoc;
+                    isContentEditable = true;
+                    console.log('✅ Found contenteditable body in iframe (Google Docs)');
+                    break;
+                  }
+                }
+              } catch (e) {
+                // Cross-origin iframe, skip
+              }
+            }
+          }
+        }
+        
+        if (!hasDescription && isContentEditable && activeEl) {
+          console.log('✅ Typing directly into focused element:', activeEl.tagName);
+          
+          // For contenteditable (Google Docs, etc.), use execCommand for better compatibility
+          if (activeEl.isContentEditable || activeEl.getAttribute('contenteditable') === 'true') {
+            console.log('📝 Using execCommand for contenteditable element');
+            
+            // Type the whole text at once using execCommand (most reliable for Google Docs)
+            targetDoc.execCommand('insertText', false, textToType);
+            
+            // Trigger input event for React-based editors
+            activeEl.dispatchEvent(new InputEvent('input', { 
+              data: textToType, 
+              inputType: 'insertText',
+              bubbles: true 
+            }));
+            
+          } else {
+            // For regular inputs/textareas, type character by character
+            for (const char of textToType) {
+              activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+              activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+              
+              activeEl.value += char;
+              
+              activeEl.dispatchEvent(new InputEvent('input', { data: char, bubbles: true }));
+              activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+              
+              await sleep(20);
+            }
+          }
+          
+          activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+          result.observations.typed_text = textToType;
+          result.observations.input_field = activeEl.tagName;
+          break;
+        }
+        
+        // Strategy 1: Try to find input via hybrid vision+DOM (when description provided)
         const [typeScreenshot, typeDOMSnapshot] = await Promise.all([
           captureScreenshot(),
           Promise.resolve(captureDOMSnapshot())
@@ -611,38 +733,105 @@ async function executeStepVision(step) {
         }
         
         if (!typed) {
-          throw new Error('No input field found to type into');
+          console.log('⚠️ No input field found via vision/DOM, checking for contenteditable...');
+          // Last resort: check for any contenteditable element
+          const editables = document.querySelectorAll('[contenteditable="true"]');
+          console.log('🔍 Found', editables.length, 'contenteditable elements in main doc');
+          
+          // Also check iframes
+          const iframes = document.querySelectorAll('iframe');
+          let foundEditable = false;
+          for (const iframe of iframes) {
+            try {
+              const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+              if (iframeDoc) {
+                const iframeEditables = iframeDoc.querySelectorAll('[contenteditable="true"]');
+                console.log('🔍 Found', iframeEditables.length, 'contenteditable elements in iframe');
+                if (iframeEditables.length > 0 || (iframeDoc.body && iframeDoc.body.isContentEditable)) {
+                  activeEl = iframeDoc.body.isContentEditable ? iframeDoc.body : iframeEditables[0];
+                  targetDoc = iframeDoc;
+                  foundEditable = true;
+                  console.log('✅ Using contenteditable from iframe');
+                  break;
+                }
+              }
+            } catch (e) {
+              // Cross-origin, skip
+            }
+          }
+          
+          if (!foundEditable && editables.length === 0) {
+            throw new Error('No input field found to type into');
+          }
+          
+          if (!foundEditable) {
+            activeEl = editables[0];
+          }
         }
         
-        // Type the text
-        const activeEl = document.activeElement;
+        // Type the text - use appropriate method based on element type
+        console.log('📝 Final typing into:', activeEl?.tagName, 'isContentEditable:', activeEl?.isContentEditable);
+        
+        if (!activeEl) {
+          activeEl = targetDoc.activeElement;
+          console.log('📝 Using targetDoc.activeElement:', activeEl?.tagName);
+        }
+        
         if (activeEl) {
-          // Clear existing content
-          if (activeEl.value !== undefined) {
-            activeEl.value = '';
-          } else if (activeEl.textContent !== undefined) {
-            activeEl.textContent = '';
-          }
-          
-          // Type character by character for better reliability
-          for (const char of textToType) {
-            activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-            activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+          // For contenteditable elements (Google Docs, etc.), use execCommand
+          if (activeEl.isContentEditable || activeEl.getAttribute('contenteditable') === 'true') {
+            console.log('✅ Using execCommand for contenteditable');
             
-            if (activeEl.value !== undefined) {
-              activeEl.value += char;
-            } else {
-              activeEl.textContent += char;
+            // Focus the element first
+            activeEl.focus();
+            await sleep(100);
+            
+            // Use execCommand which works for contenteditable
+            const success = targetDoc.execCommand('insertText', false, textToType);
+            console.log('📝 execCommand result:', success);
+            
+            if (!success) {
+              // Fallback: simulate typing events
+              console.log('⚠️ execCommand failed, using event simulation');
+              for (const char of textToType) {
+                const keyEvent = new KeyboardEvent('keydown', { key: char, bubbles: true, cancelable: true });
+                activeEl.dispatchEvent(keyEvent);
+                targetDoc.execCommand('insertText', false, char);
+                await sleep(10);
+              }
             }
             
-            activeEl.dispatchEvent(new InputEvent('input', { data: char, bubbles: true }));
-            activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+            activeEl.dispatchEvent(new InputEvent('input', { 
+              data: textToType, 
+              inputType: 'insertText',
+              bubbles: true 
+            }));
             
-            await sleep(20); // Small delay between characters
+          } else {
+            // For regular input/textarea elements
+            console.log('✅ Using value setter for input/textarea');
+            
+            // Clear existing content
+            if (activeEl.value !== undefined) {
+              activeEl.value = '';
+            }
+            
+            // Type character by character for better reliability
+            for (const char of textToType) {
+              activeEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+              activeEl.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+              
+              activeEl.value += char;
+              
+              activeEl.dispatchEvent(new InputEvent('input', { data: char, bubbles: true }));
+              activeEl.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+              
+              await sleep(20);
+            }
+            
+            // Trigger change event
+            activeEl.dispatchEvent(new Event('change', { bubbles: true }));
           }
-          
-          // Trigger change event
-          activeEl.dispatchEvent(new Event('change', { bubbles: true }));
         }
         
         result.observations.typed_text = textToType;
@@ -988,3 +1177,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   return false;
 });
+
+})(); // End IIFE
+} // End double injection guard
+
+})(); // End IIFE
+} // End double injection guard
+
+})(); // End IIFE
+} // End double injection guard

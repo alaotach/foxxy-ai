@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foxy AI Voice Commands - Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: #242424;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #ED4A14 0%, #ff6b3d 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #a0a0a0;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .status-box {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border: 1px solid #333;
+        }
+
+        .status-text {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .status-text.listening {
+            color: #ED4A14;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-text.active {
+            color: #4CAF50;
+        }
+
+        .status-text.error {
+            color: #f44336;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .btn {
+            width: 100%;
+            padding: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: inherit;
+            margin-bottom: 15px;
+        }
+
+        .btn-primary {
+            background: #ED4A14;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #ff5a1f;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(237, 74, 20, 0.3);
+        }
+
+        .btn-primary:active {
+            background: #ED4A14;
+        }
+
+        .btn-primary.active {
+            background: #4CAF50;
+        }
+
+        .btn-secondary {
+            background: #2a2a2a;
+            color: #e0e0e0;
+            border: 1px solid #404040;
+        }
+
+        .btn-secondary:hover {
+            background: #333;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .transcript-box {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 1px solid #333;
+            min-height: 100px;
+        }
+
+        .transcript-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #808080;
+            margin-bottom: 10px;
+        }
+
+        .transcript-text {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #e0e0e0;
+        }
+
+        .icon {
+            font-size: 48px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .info {
+            background: #1a3a4a;
+            border-left: 3px solid #2196F3;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 0 8px 8px 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .info strong {
+            color: #64B5F6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🦊🎤</div>
+        <h1>Foxy AI Voice Commands</h1>
+        <p class="subtitle">Test wake word detection and voice commands</p>
+
+        <div class="status-box">
+            <div id="status" class="status-text">
+                Click "Enable Voice Commands" to start
+            </div>
+        </div>
+
+        <button id="enableBtn" class="btn btn-primary">
+            🎤 Enable Voice Commands
+        </button>
+
+        <button id="testTTS" class="btn btn-secondary" disabled>
+            🔊 Test Voice Response
+        </button>
+
+        <div class="transcript-box">
+            <div class="transcript-label">Last Command</div>
+            <div id="transcript" class="transcript-text">
+                No commands yet. Say "Hey Foxy" to start!
+            </div>
+        </div>
+
+        <div class="info">
+            <strong>📋 How to use:</strong><br>
+            1. Click "Enable Voice Commands"<br>
+            2. Allow microphone access<br>
+            3. Enter your Picovoice Access Key when prompted<br>
+            4. Say <strong>"Hey Foxy"</strong> clearly<br>
+            5. Listen for the beep, then speak your command
+        </div>
+
+        <div class="info" style="margin-top: 15px; background: #3a2a1a; border-left-color: #FFA726;">
+            <strong>⚠️ Note:</strong> This is a standalone test page. In the actual extension, voice commands trigger browser automation. Here, we just display what you said.
+        </div>
+    </div>
+
+    <script type="module">
+        // Simulated voice commands test (without full extension context)
+        const enableBtn = document.getElementById('enableBtn');
+        const testTTS = document.getElementById('testTTS');
+        const status = document.getElementById('status');
+        const transcript = document.getElementById('transcript');
+
+        let voiceEnabled = false;
+        let recognition = null;
+
+        enableBtn.addEventListener('click', async () => {
+            if (!voiceEnabled) {
+                await enableVoice();
+            } else {
+                disableVoice();
+            }
+        });
+
+        testTTS.addEventListener('click', () => {
+            testSpeech();
+        });
+
+        async function enableVoice() {
+            try {
+                // Request microphone
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+
+                // Initialize speech recognition
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    throw new Error('Speech recognition not supported');
+                }
+
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+
+                recognition.onresult = (event) => {
+                    const text = event.results[event.results.length - 1][0].transcript;
+                    const confidence = event.results[event.results.length - 1][0].confidence;
+                    
+                    transcript.textContent = `"${text}" (${(confidence * 100).toFixed(0)}% confidence)`;
+                    
+                    // Check for wake word
+                    if (text.toLowerCase().includes('hey foxy')) {
+                        status.textContent = '🎤 Wake word detected! Listening for command...';
+                        status.className = 'status-text listening';
+                        playBeep();
+                        speak('Yes, how can I help?');
+                    } else {
+                        status.textContent = `Heard: "${text}"`;
+                        status.className = 'status-text active';
+                    }
+                };
+
+                recognition.onerror = (event) => {
+                    status.textContent = `❌ Error: ${event.error}`;
+                    status.className = 'status-text error';
+                };
+
+                recognition.onend = () => {
+                    if (voiceEnabled) {
+                        recognition.start(); // Restart if still enabled
+                    }
+                };
+
+                recognition.start();
+
+                voiceEnabled = true;
+                enableBtn.textContent = '🔇 Disable Voice Commands';
+                enableBtn.classList.add('active');
+                testTTS.disabled = false;
+                status.textContent = '🟢 Listening... Say "Hey Foxy" to activate!';
+                status.className = 'status-text active';
+
+            } catch (error) {
+                status.textContent = `❌ Error: ${error.message}`;
+                status.className = 'status-text error';
+            }
+        }
+
+        function disableVoice() {
+            if (recognition) {
+                recognition.stop();
+                recognition = null;
+            }
+            voiceEnabled = false;
+            enableBtn.textContent = '🎤 Enable Voice Commands';
+            enableBtn.classList.remove('active');
+            testTTS.disabled = true;
+            status.textContent = 'Voice commands disabled';
+            status.className = 'status-text';
+        }
+
+        function playBeep() {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            oscillator.frequency.value = 800;
+            gainNode.gain.value = 0.3;
+
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.1);
+        }
+
+        function speak(text) {
+            if (!window.speechSynthesis) return;
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function testSpeech() {
+            speak('This is Foxy AI. Voice synthesis is working correctly.');
+            status.textContent = '🔊 Playing test voice response...';
+            status.className = 'status-text listening';
+            setTimeout(() => {
+                status.textContent = '🟢 Listening... Say "Hey Foxy" to activate!';
+                status.className = 'status-text active';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>

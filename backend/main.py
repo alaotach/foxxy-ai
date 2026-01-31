@@ -242,10 +242,12 @@ Examples:
 - If download button not found: try right_click on the image then use vision_click for "Save image" menu item
 
 IMPORTANT for TYPE actions:
-- When using type action, you MUST look at the screenshot and provide the x,y coordinates of the input field
-- Example: {{"type": "type", "x": 340, "y": 280, "text": "Valentine's Day", "description": "search input field"}}
-- The coordinates should point to the CENTER of the input field you see in the screenshot
-- This is more reliable than clicking first - it uses coordinate-based input setter
+- **If the input field is NOT focused yet**: Use vision_click to click on it first, then type in next step
+- **If the input field IS already focused** (after clicking or page loaded with focus): Use {{"type": "type", "text": "your text"}} WITHOUT x,y coordinates
+- **Only use x,y coordinates with type if** you need to click AND type in one action (rare)
+- For Google Docs, Word Online, or any rich text editor: After opening the document, just use {{"type": "type", "text": "..."}} without coordinates
+- Example for unfocused field: {{"type": "vision_click", "description": "search input field"}} → next step: {{"type": "type", "text": "Valentine's Day"}}
+- Example for focused field: {{"type": "type", "text": "Valentine's Day"}} (no coordinates needed)
 
 IMPORTANT for vision_click descriptions:
 - Be SPECIFIC about visual appearance (color, size, position)
@@ -286,20 +288,17 @@ Return ONLY valid JSON (no escaped apostrophes in strings)."""
                 # CRITICAL FIX: Handle invalid action types and fix common issues
                 next_action = decision.get("next_action")
                 if next_action:
-                    # Fix 1: Convert invalid 'type' without selector to vision_click on input
-                    # BUT: If coordinates (x, y) are provided, keep it as 'type' (coordinate-based typing)
-                    if next_action.get("type") == "type" and not next_action.get("selector"):
-                        # Check if coordinates are provided (new coordinate-based typing)
+                    # Type actions without selector are now VALID - they type into focused element
+                    # Only convert to vision_click if coordinates are provided (coordinate-based clicking before typing)
+                    if next_action.get("type") == "type":
                         has_coordinates = next_action.get("x") is not None and next_action.get("y") is not None
                         
-                        if not has_coordinates:
-                            print(f"⚠️ Converting invalid 'type' action to 'vision_click' (no selector)")
-                            # First, click on the search/input field
-                            next_action["type"] = "vision_click"
-                            next_action["description"] = next_action.get("description", "search input field")
-                            # Text will be typed in next iteration after click succeeds
+                        if has_coordinates:
+                            # Coordinates provided - this is for click-then-type in one action
+                            print(f"✅ Type action with coordinates ({next_action['x']}, {next_action['y']}) - will click then type")
                         else:
-                            print(f"✅ Type action with coordinates ({next_action['x']}, {next_action['y']}) - using coordinate-based typing")
+                            # No coordinates - this types into currently focused element (Google Docs, etc.)
+                            print(f"✅ Type action without coordinates - typing into focused element: '{next_action.get('text', '')[:50]}'")
                     
                     # Fix 2: Resolve vision_click coordinates NOW to reduce round trips
                     if next_action.get("type") == "vision_click":

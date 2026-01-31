@@ -1,0 +1,41 @@
+{
+  "voice": {
+    "enabled": false,
+    "language": "en",
+    "tts": {
+      "enabled": true,
+      "speed": 1.05,
+      "steps": 5,
+      "defaultVoice": "F1",
+      "silenceDuration": 0.3
+    },
+    "wakeWord": {
+      "sensitivity": 0.5,
+      "keyword": "Hey Foxy"
+    },
+    "speechRecognition": {
+      "language": "en-US",
+      "continuous": false,
+      "interimResults": false,
+      "maxAlternatives": 1
+    }
+  },
+  "responses": {
+    "acknowledgments": [
+      "Got it, working on it",
+      "On it",
+      "Sure thing",
+      "Right away"
+    ],
+    "errors": [
+      "Sorry, I couldn't do that",
+      "I encountered an error",
+      "Something went wrong"
+    ],
+    "success": [
+      "Done",
+      "Task completed",
+      "All set"
+    ]
+  }
+}

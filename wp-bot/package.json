@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "baileys": "^7.0.0-rc.9",
+    "child_process": "^1.0.2",
+    "fs": "^0.0.1-security",
+    "jsqr": "^1.4.0",
+    "openai": "^6.17.0",
+    "os": "^0.1.2",
+    "path": "^0.12.7",
+    "pino": "^10.3.0",
+    "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

@@ -302,12 +302,117 @@
       font-size: 13px;
       padding: 8px 0;
     }
+
+    /* Voice Commands */
+    .voice-section {
+      padding: 12px 16px;
+      background: #212121;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    #voiceBtn {
+      padding: 8px 16px;
+      background: #2a2a2a;
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    #voiceBtn:hover {
+      background: #333;
+      border-color: var(--accent-color);
+    }
+
+    #voiceBtn.active {
+      background: var(--accent-color);
+      border-color: var(--accent-color);
+      color: white;
+    }
+
+    #voiceBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .stop-btn {
+      padding: 8px 16px;
+      background: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      display: none;
+      margin-left: 8px;
+    }
+
+    .stop-btn:hover {
+      background: #c82333;
+      transform: translateY(-1px);
+    }
+
+    .stop-btn:active {
+      transform: translateY(0);
+    }
+
+    .voice-status {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .voice-status.active {
+      color: #4CAF50;
+    }
+
+    .voice-status.listening {
+      color: var(--accent-color);
+      animation: pulse 1.5s infinite;
+    }
+
+    .voice-status.error {
+      color: #f44336;
+    }
+
+    .voice-status.inactive {
+      color: var(--text-secondary);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <div class="logo"></div>
+    <div class="logo">🦊</div>
     <div class="title">Foxy AI</div>
+  </div>
+
+  <!-- Voice Commands Section -->
+  <div class="voice-section">
+    <button id="voiceBtn">🎤 Enable Voice</button>
+    <button id="testTypeBtn" style="padding: 8px 16px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+      🧪 Test Typing
+    </button>
+    <div id="voiceStatus" class="voice-status inactive">
+      Voice commands disabled
+    </div>
   </div>
 
   <div id="chatContainer">
@@ -324,7 +429,7 @@
         type="text" 
         id="promptInput" 
         class="input-box"
-        placeholder="Type a task..."
+        placeholder="Type a task or say 'Hey Foxy'..."
         autocomplete="off"
       />
       <button id="executeBtn" class="send-btn">
@@ -333,6 +438,12 @@
     </div>
   </div>
 
-  <script src="assistant.js"></script>
+  <!-- Load ONNX Runtime (if available) for TTS support -->
+  <script src="libs/ort.min.js" onerror="console.warn('ONNX Runtime not found - TTS will use browser fallback')"></script>
+  
+  <!-- Load Porcupine Wake Word SDK -->
+  <script src="libs/porcupine.js" onerror="console.warn('Porcupine SDK not found - run download-porcupine.ps1')"></script>
+  
+  <script type="module" src="assistant.js"></script>
 </body>
 </html>

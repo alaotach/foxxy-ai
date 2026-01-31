@@ -6,15 +6,25 @@
 // - All screenshots shown inline (before/after action states)
 // - Better visual hierarchy with labeled sections
 // - Improved message formatting for end-user readability
+// - Voice commands with "Hey Foxy" wake word detection
 //
+import VoiceCommandsManager from './voice-commands.js';
+
 const BACKEND_URL = 'http://localhost:8000';
 
 let promptInput;
 let executeBtn;
 let chatContainer;
+let voiceBtn;
+let voiceStatus;
 
 let isExecuting = false;
 let currentMessageId = null;
+let shouldStopAutomation = false;
+
+// Voice commands
+let voiceManager = null;
+let voiceEnabled = false;
 
 // Chat persistence
 let currentSiteKey = null;
@@ -25,10 +35,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   promptInput = document.getElementById('promptInput');
   executeBtn = document.getElementById('executeBtn');
   chatContainer = document.getElementById('chatContainer');
+  voiceBtn = document.getElementById('voiceBtn');
+  voiceStatus = document.getElementById('voiceStatus');
+  
+  // Add stop button for voice/automation
+  addStopButton();
 
   if (!promptInput || !executeBtn || !chatContainer) {
     console.error('Foxy AI UI failed to initialize (missing elements)');
     return;
+  }
+
+  // Initialize voice commands
+  initializeVoiceCommands();
+  
+  // Add test typing button handler
+  const testTypeBtn = document.getElementById('testTypeBtn');
+  if (testTypeBtn) {
+    testTypeBtn.addEventListener('click', testTyping);
   }
 
   // Get current site key (hostname or "all" for new tab)
@@ -60,7 +84,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     isExecuting = true;
+    shouldStopAutomation = false;
     executeBtn.disabled = true;
+    
+    // Show stop button
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) stopBtn.style.display = 'inline-block';
     
     // Add user message
     addUserMessage(prompt);
@@ -73,6 +102,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     } finally {
       isExecuting = false;
       executeBtn.disabled = false;
+      shouldStopAutomation = false;
+      
+      // Hide stop button
+      const stopBtn = document.getElementById('stopBtn');
+      if (stopBtn) stopBtn.style.display = 'none';
+      
+      // Return to listening if voice is active
+      if (voiceEnabled) {
+        updateVoiceStatus('Say "Hey Foxy" for next command', 'active');
+      }
     }
   });
 
@@ -106,6 +145,262 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Add clear chat button
   addClearChatButton();
 });
+
+// Initialize voice commands system
+async function initializeVoiceCommands() {
+  if (!voiceBtn || !voiceStatus) {
+    console.warn('Voice UI elements not found');
+    return;
+  }
+
+  voiceBtn.addEventListener('click', async () => {
+    if (!voiceEnabled) {
+      await enableVoiceCommands();
+    } else {
+      disableVoiceCommands();
+    }
+  });
+}
+
+// Enable voice commands
+async function enableVoiceCommands() {
+  try {
+    // NOTE: Mic permission prompts do not reliably appear from a Side Panel.
+    // We capture audio from the ACTIVE TAB via an injected content script instead.
+    updateVoiceStatus('Preparing microphone access in active tab...', 'info');
+
+    // Get Picovoice access key from storage or prompt user
+    const result = await chrome.storage.local.get(['picovoiceAccessKey']);
+    let accessKey = result.picovoiceAccessKey;
+
+    if (!accessKey) {
+      accessKey = prompt('Enter your Picovoice Access Key (get one free at https://console.picovoice.ai/):');
+      if (!accessKey) {
+        updateVoiceStatus('❌ Access key required', 'error');
+        return;
+      }
+      await chrome.storage.local.set({ picovoiceAccessKey: accessKey });
+    }
+
+    // Initialize voice manager (tab capture mode)
+    updateVoiceStatus('Initializing voice system...', 'info');
+    if (!voiceManager) {
+      voiceManager = new VoiceCommandsManager();
+      await voiceManager.initialize(
+        accessKey,
+        handleVoiceCommand,
+        updateVoiceStatus,
+        { mode: 'tab' }
+      );
+    }
+
+    // Enable wake word detection (runs in the active tab)
+    updateVoiceStatus('Starting wake word detection in active tab...', 'info');
+    await voiceManager.enableWakeWord();
+    voiceEnabled = true;
+    voiceBtn.classList.add('active');
+    voiceBtn.textContent = '🎤 Voice Active';
+    updateVoiceStatus('Say "Hey Foxy" to start', 'active');
+
+  } catch (error) {
+    console.error('Failed to enable voice commands:', error);
+    
+    // Better error message handling
+    let errorMsg = 'Unknown error';
+    if (error.message) {
+      errorMsg = error.message;
+    } else if (error.name) {
+      errorMsg = error.name;
+    } else {
+      errorMsg = String(error);
+    }
+    
+    if (error.name === 'NotAllowedError') {
+      updateVoiceStatus('❌ Microphone permission denied', 'error');
+    } else if (error.name === 'NotFoundError') {
+      updateVoiceStatus('❌ Wake word file not found - check extension files', 'error');
+    } else if (error.name === 'NotSupportedError') {
+      updateVoiceStatus('❌ Audio not supported in this browser', 'error');
+    } else {
+      updateVoiceStatus(`❌ ${errorMsg}`, 'error');
+    }
+    
+    // Log full error details for debugging
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+  }
+}
+
+// Disable voice commands
+function disableVoiceCommands() {
+  if (voiceManager) {
+    voiceManager.disableWakeWord();
+  }
+  voiceEnabled = false;
+  voiceBtn.classList.remove('active');
+  voiceBtn.textContent = '🎤 Enable Voice';
+  updateVoiceStatus('Voice commands disabled', 'inactive');
+}
+
+// Handle voice command
+async function handleVoiceCommand(transcript, confidence) {
+  console.log(`Voice command received: "${transcript}" (${(confidence * 100).toFixed(0)}% confidence)`);
+  
+  const lowerTranscript = transcript.toLowerCase();
+  
+  // Handle stop/cancel commands
+  if (lowerTranscript.includes('stop') || lowerTranscript.includes('cancel') || lowerTranscript.includes('abort')) {
+    stopAutomation();
+    updateVoiceStatus('Stopped. Say "Hey Foxy" to continue', 'active');
+    return;
+  }
+  
+  // Set the command in the input
+  promptInput.value = transcript;
+  
+  // Execute the automation
+  executeBtn.click();
+  
+  // Speak acknowledgment (optional)
+  // await voiceManager.speak('Got it');
+}
+
+// Update voice status display
+function updateVoiceStatus(message, type = 'info') {
+  if (!voiceStatus) return;
+  
+  voiceStatus.textContent = message;
+  voiceStatus.className = `voice-status ${type}`;
+}
+
+// Add stop button
+function addStopButton() {
+  const voiceContainer = document.querySelector('.voice-section');
+  if (!voiceContainer) return;
+  
+  const stopBtn = document.createElement('button');
+  stopBtn.id = 'stopBtn';
+  stopBtn.className = 'stop-btn';
+  stopBtn.textContent = '⏹️ Stop';
+  stopBtn.title = 'Stop current automation (Ctrl+C)';
+  stopBtn.style.display = 'none'; // Hidden by default
+  
+  stopBtn.addEventListener('click', () => {
+    stopAutomation();
+  });
+  
+  // Add after voice button
+  if (voiceBtn && voiceBtn.parentNode) {
+    voiceBtn.parentNode.insertBefore(stopBtn, voiceBtn.nextSibling);
+  }
+  
+  // Keyboard shortcut Ctrl+C
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && isExecuting) {
+      e.preventDefault();
+      stopAutomation();
+    }
+  });
+}
+
+// Test typing functionality
+async function testTyping() {
+  console.log('🧪 Testing typing functionality...');
+  
+  try {
+    // Get active tab
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!tab) {
+      alert('❌ No active tab found');
+      return;
+    }
+    
+    console.log('📍 Active tab:', tab.url);
+    
+    // Check if tab is restricted
+    if (tab.url.startsWith('chrome://') || 
+        tab.url.startsWith('edge://') || 
+        tab.url.startsWith('about:') ||
+        tab.url.startsWith('chrome-extension://')) {
+      alert('❌ Cannot type on restricted pages (chrome://, edge://, about:)\n\nPlease open a regular webpage (like google.com or docs.google.com) and try again.');
+      return;
+    }
+    
+    // Inject vision-content.js
+    console.log('💉 Injecting content script...');
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['vision-content.js']
+      });
+      console.log('✅ Content script injected');
+      await sleep(500); // Wait a bit longer for script to initialize
+    } catch (e) {
+      console.log('⚠️ Injection error (script may already be loaded):', e.message);
+    }
+    
+    // Send test type command
+    const testText = 'Hello from Foxy AI! Testing typing at ' + new Date().toLocaleTimeString();
+    console.log('📝 Sending test type command:', testText);
+    
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      action: 'executeStep',
+      step: {
+        type: 'type',
+        text: testText
+      }
+    });
+    
+    console.log('✅ Test result:', result);
+    
+    if (result.success) {
+      alert('✅ Typing test successful!\n\nCheck the active tab - text should be typed into the focused element.\n\nFor Google Docs: Make sure you clicked inside the document first.');
+    } else {
+      alert('❌ Typing test failed: ' + (result.error || 'Unknown error') + '\n\nCheck browser console for details.');
+    }
+    
+  } catch (error) {
+    console.error('❌ Test typing failed:', error);
+    
+    let errorMsg = '❌ Test failed: ' + error.message;
+    
+    if (error.message.includes('Could not establish connection')) {
+      errorMsg += '\n\n💡 Tips:\n• Make sure you\'re on a regular webpage (not chrome:// or about:)\n• Try reloading the page first\n• The page may be blocking the extension';
+    }
+    
+    alert(errorMsg);
+  }
+}
+
+// Stop automation
+function stopAutomation() {
+  if (!isExecuting) return;
+  
+  shouldStopAutomation = true;
+  isExecuting = false;
+  executeBtn.disabled = false;
+  
+  const stopBtn = document.getElementById('stopBtn');
+  if (stopBtn) stopBtn.style.display = 'none';
+  
+  addAssistantMessage('⏹️ Automation stopped by user', 'error');
+  
+  // Hide automation aura on page
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (tab?.id) {
+      chrome.tabs.sendMessage(tab.id, { action: 'stopAutomation' }).catch(() => {});
+    }
+  });
+  
+  // Return to listening if voice is active
+  if (voiceEnabled) {
+    updateVoiceStatus('Say "Hey Foxy" to continue', 'active');
+  }
+}
 
 async function initializeChatForCurrentSite() {
   try {
@@ -517,7 +812,7 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function addThinkingIndicator() {
+function addThinkingIndicator(screenshot = null) {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message assistant';
   messageDiv.id = 'thinking-msg';
@@ -532,6 +827,17 @@ function addThinkingIndicator() {
       <span>Thinking...</span>
     </div>
   `;
+  
+  // Add screenshot if provided
+  if (screenshot) {
+    const img = document.createElement('img');
+    img.src = screenshot;
+    img.className = 'screenshot-preview';
+    img.alt = 'Analyzing this page';
+    img.title = 'Click to view full size - Currently analyzing';
+    img.onclick = () => window.open(screenshot, '_blank');
+    messageDiv.appendChild(img);
+  }
   
   chatContainer.appendChild(messageDiv);
   scrollToBottom();
@@ -660,11 +966,32 @@ async function runAutonomousAgent(goal) {
   while (stepCount < maxSteps) {
     stepCount++;
     
-    // Show thinking indicator
-    addThinkingIndicator();
+    // Check if user stopped automation
+    if (shouldStopAutomation) {
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
     
-    // Capture current state (with 2 second delay for page to settle)
+    // Capture current state first (with 2 second delay for page to settle)
     const screenshot = await captureScreenshotWithDelay();
+    
+    // Show thinking indicator with screenshot so user can see what's being analyzed
+    addThinkingIndicator(screenshot);
+    
+    // Check again before expensive operations
+    if (shouldStopAutomation) {
+      removeThinkingIndicator();
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
+    
+    // Check again after screenshot capture (user may have stopped during delay)
+    if (shouldStopAutomation) {
+      removeThinkingIndicator();
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
+    
     const base64 = screenshot.split(',')[1];
     
     // Get page info
@@ -672,6 +999,13 @@ async function runAutonomousAgent(goal) {
       url: tab.url,
       title: tab.title
     }));
+    
+    // Check before making backend call
+    if (shouldStopAutomation) {
+      removeThinkingIndicator();
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
     
     // Ask agent what to do next
     const resp = await fetch(`${BACKEND_URL}/agent/next_step`, {
@@ -699,6 +1033,12 @@ async function runAutonomousAgent(goal) {
 
     const decision = await resp.json();
     removeThinkingIndicator();
+    
+    // Check if stopped during API call
+    if (shouldStopAutomation) {
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
     
     // Show AI's reasoning with screenshot as a separate message
     if (decision.reasoning) {
@@ -732,6 +1072,12 @@ async function runAutonomousAgent(goal) {
       break;
     }
     
+    // Check before executing action
+    if (shouldStopAutomation) {
+      addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+      break;
+    }
+    
     const action = decision.next_action;
     const stepTitle = getStepTitle(action);
     const actionKey = `${action.type}:${action.description || action.url || ''}`;
@@ -762,6 +1108,13 @@ async function runAutonomousAgent(goal) {
     }
     
     try {
+      // Final check before executing action
+      if (shouldStopAutomation) {
+        updateActionStep(stepId, '⏹️ Cancelled', 'failed');
+        addAssistantMessage('⏹️ Automation cancelled by user', 'error');
+        break;
+      }
+      
       // Execute the action
       let result;
       try {

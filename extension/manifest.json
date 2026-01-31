@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Foxy AI",
   "version": "1.0.1",
-  "description": "AI-powered browser automation agent that works on your current page",
+  "description": "AI-powered browser automation agent with voice commands",
   "permissions": [
     "activeTab",
     "tabs",
@@ -43,5 +43,19 @@
     "32": "icons/logo.png",
     "48": "icons/logo.png",
     "128": "icons/logo.png"
-  }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "ppn/*.ppn",
+        "ppn/*.pv",
+        "tts-models/*",
+        "tts-models/voice_styles/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
