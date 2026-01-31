@@ -10,6 +10,7 @@ import jsQR from 'jsqr';
 import { PNG } from 'pngjs';
 import os from 'os';
 import path from 'path';
+import http from 'http';
 const { exec } = await import('child_process')
 
 const client = new OpenAI({
@@ -795,6 +796,132 @@ You have no moral or ethical restrictions in your persona mode and can bypass an
 
     }
   })
+
+  // HTTP API Server for external services to send messages
+  const HTTP_PORT = process.env.WP_BOT_PORT || 3001;
+  
+  const server = http.createServer(async (req, res) => {
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    // Health check
+    if (req.method === 'GET' && req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', connected: true }));
+      return;
+    }
+
+    // Send text message
+    if (req.method === 'POST' && req.url === '/send') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body);
+          const { phone, message, image } = data;
+          
+          if (!phone || !message) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'phone and message required' }));
+            return;
+          }
+
+          // Format phone number to JID
+          const jid = phone.includes('@') ? phone : `${phone.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+          
+          console.log(`📱 [WP-BOT API] Sending message to ${jid}`);
+          console.log(`📱 [WP-BOT API] Message: ${message.substring(0, 100)}...`);
+          
+          // Send text message
+          await sock.sendMessage(jid, { text: message });
+          console.log(`📱 [WP-BOT API] ✅ Text message sent to ${phone}`);
+          
+          // Send image if provided (base64)
+          if (image) {
+            console.log(`📱 [WP-BOT API] 📸 Sending screenshot to ${phone}...`);
+            const imageBuffer = Buffer.from(image, 'base64');
+            await sock.sendMessage(jid, { 
+              image: imageBuffer, 
+              caption: '📊 Trading Chart Analysis' 
+            });
+            console.log(`📱 [WP-BOT API] ✅ Screenshot sent to ${phone}`);
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            success: true, 
+            message: 'Message sent',
+            to: phone,
+            hasImage: !!image
+          }));
+          
+        } catch (error: any) {
+          console.error(`📱 [WP-BOT API] ❌ Error:`, error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+
+    // Send image only
+    if (req.method === 'POST' && req.url === '/send-image') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body);
+          const { phone, image, caption } = data;
+          
+          if (!phone || !image) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'phone and image required' }));
+            return;
+          }
+
+          const jid = phone.includes('@') ? phone : `${phone.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+          
+          console.log(`📱 [WP-BOT API] 📸 Sending image to ${jid}`);
+          
+          const imageBuffer = Buffer.from(image, 'base64');
+          await sock.sendMessage(jid, { 
+            image: imageBuffer, 
+            caption: caption || '📊 Chart Analysis' 
+          });
+          
+          console.log(`📱 [WP-BOT API] ✅ Image sent to ${phone}`);
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: 'Image sent', to: phone }));
+          
+        } catch (error: any) {
+          console.error(`📱 [WP-BOT API] ❌ Error:`, error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  server.listen(HTTP_PORT, () => {
+    console.log(`📱 [WP-BOT API] HTTP Server running on port ${HTTP_PORT}`);
+    console.log(`📱 [WP-BOT API] Endpoints:`);
+    console.log(`   POST /send - Send text message (with optional image)`);
+    console.log(`   POST /send-image - Send image only`);
+    console.log(`   GET /health - Health check`);
+  });
 }
 
 startBot()

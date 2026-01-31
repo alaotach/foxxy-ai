@@ -149,7 +149,32 @@ GOAL: {goal}
 - If goal contains "find": Task is COMPLETE when the target item/page is visible
 - If goal contains "create", "make", "design": Task is COMPLETE when final output is saved/downloaded
 - If goal contains "navigate to", "go to": Task is COMPLETE when target page loads
+- If goal contains "analyze", "chart", "trading", "technical analysis", "crypto", "ETH", "BTC", "USDT": Provide DETAILED TECHNICAL ANALYSIS before marking complete
 - **IMPORTANT**: Only apply these criteria if the goal actually matches - don't mark complete just because a video is playing if the goal wasn't to play a video
+
+**TRADING CHART ANALYSIS** (if you see a trading chart like Bybit, Binance, TradingView):
+When viewing a crypto/stock chart, ALWAYS provide detailed technical analysis in your reasoning:
+1. **Price Action**: Current price, recent high/low, % change visible
+2. **Trend Direction**: Is it uptrend, downtrend, or sideways? Look at candle patterns
+3. **Candlestick Patterns**: Identify any patterns (doji, hammer, engulfing, etc.)
+4. **Support/Resistance**: Identify key levels visible on the chart
+5. **Volume Analysis**: If volume bars visible, is it increasing or decreasing?
+6. **Indicators**: If RSI, MACD, or other indicators visible, read their values
+7. **Prediction**: Based on the analysis, give a SHORT-TERM prediction (bullish/bearish/neutral)
+8. **SEND TO WHATSAPP**: After analysis, use send_whatsapp action to send the analysis with screenshot
+
+Example reasoning for chart analysis:
+"📊 TECHNICAL ANALYSIS - ETH/USDT:
+Current Price: $3,245.67 (-2.45%)
+Trend: Downtrend on 1H timeframe, series of lower highs
+Candlestick: Last 3 candles show bearish engulfing pattern
+Support: $3,200 (tested twice), Resistance: $3,350
+Volume: Declining on recent candles, suggesting weak selling pressure
+RSI: 38 (approaching oversold)
+PREDICTION: Short-term BEARISH, but RSI suggests potential bounce at $3,200 support"
+
+After chart analysis, ALWAYS send via WhatsApp:
+{{"type": "send_whatsapp", "whatsapp_message": "📊 TECHNICAL ANALYSIS - ETH/USDT:\\nPrice: $3,245.67 (-2.45%)\\nTrend: Downtrend\\nPattern: Bearish engulfing\\nSupport: $3,200 | Resistance: $3,350\\nRSI: 38 (oversold)\\n🔴 PREDICTION: SHORT-TERM BEARISH", "include_screenshot": true}}
 
 CURRENT PAGE: {viewport.get('url', 'unknown')}
 PAGE TITLE: {viewport.get('title', 'unknown')}
@@ -157,6 +182,7 @@ PAGE TITLE: {viewport.get('title', 'unknown')}
 CRITICAL RULES:
 - If current URL starts with 'about:', 'chrome:', 'moz-extension:' - IMMEDIATELY navigate away
 - For Google searches: Use navigate action to https://www.google.com/search?q=YOUR_QUERY
+- **NEVER navigate to web.whatsapp.com** - use send_whatsapp action instead
 - For specific sites: Use navigate action to the site directly (e.g., https://www.canva.com)
 - NEVER use vision_click or type on 'about:' pages - they are restricted
 - Example: Goal "search cat" on about:newtab → next_action: {{"type": "navigate", "url": "https://www.google.com/search?q=cat"}}
@@ -196,7 +222,7 @@ Respond with JSON:
   "needs_user_input": false,
   "user_prompt": null,
   "next_action": {{
-    "type": "navigate|vision_click|right_click|type|wait|scroll|download_image|prompt_user",
+    "type": "navigate|vision_click|right_click|type|wait|scroll|download_image|prompt_user|send_whatsapp",
     "description": "what to click/do",
     "text": "text to type (if type action)",
     "x": 340,
@@ -205,9 +231,19 @@ Respond with JSON:
     "timeout": milliseconds (if wait),
     "filename": "name.jpg (if download_image)",
     "prompt": "question to ask user (if prompt_user)",
-    "input_type": "text|password|email (if prompt_user)"
+    "input_type": "text|password|email (if prompt_user)",
+    "whatsapp_message": "message to send (if send_whatsapp)",
+    "include_screenshot": true/false (if send_whatsapp - sends current page screenshot)
   }}
 }}
+
+**WHATSAPP MESSAGING (CRITICAL - DO NOT USE WEB WHATSAPP)**:
+- NEVER navigate to web.whatsapp.com or use browser-based WhatsApp
+- Use the built-in send_whatsapp action type instead
+- This sends messages via the backend Baileys bot (already authenticated)
+- Example: {{"type": "send_whatsapp", "whatsapp_message": "📊 ETH/USDT Analysis: Price $3,245, RSI 38, BEARISH", "include_screenshot": true}}
+- The screenshot will be automatically captured and sent with the message
+- Phone number is pre-configured in the backend
 
 **CRITICAL - User Input Required:**
 - **ONLY** ask for user input when you are BLOCKED and cannot proceed without it
@@ -337,12 +373,46 @@ Return ONLY valid JSON (no escaped apostrophes in strings)."""
                     # Fix 4: Validate navigation URLs
                     if next_action.get("type") == "navigate" and next_action.get("url"):
                         url = next_action["url"]
+                        # Block web.whatsapp.com - use send_whatsapp action instead
+                        if "web.whatsapp.com" in url or "whatsapp.com" in url:
+                            print(f"⚠️ Blocking navigation to WhatsApp web - use send_whatsapp action instead")
+                            next_action["type"] = "send_whatsapp"
+                            next_action["whatsapp_message"] = "Navigation to WhatsApp blocked - please use send_whatsapp action"
+                            next_action["include_screenshot"] = False
                         # Ensure proper URL format
-                        if not url.startswith("http"):
+                        elif not url.startswith("http"):
                             if url.startswith("www."):
                                 next_action["url"] = "https://" + url
                             else:
                                 next_action["url"] = "https://www.google.com/search?q=" + url
+                    
+                    # Fix 5: Handle send_whatsapp action - send via Baileys bot
+                    if next_action.get("type") == "send_whatsapp":
+                        from agent.seek_mode import send_whatsapp_message
+                        
+                        whatsapp_msg = next_action.get("whatsapp_message", "")
+                        include_ss = next_action.get("include_screenshot", True)
+                        
+                        print(f"📱 [WhatsApp] Sending message via Baileys bot...")
+                        print(f"📱 [WhatsApp] Message: {whatsapp_msg[:100]}...")
+                        print(f"📱 [WhatsApp] Include screenshot: {include_ss}")
+                        
+                        # Send WhatsApp message via wp-bot
+                        try:
+                            await send_whatsapp_message(
+                                message=whatsapp_msg,
+                                screenshot_base64=screenshot if include_ss else None,
+                                include_chart=include_ss
+                            )
+                            print(f"📱 [WhatsApp] ✅ Message sent successfully via Baileys!")
+                            
+                            # Update the decision to reflect WhatsApp was sent
+                            decision["whatsapp_sent"] = True
+                            decision["whatsapp_message"] = whatsapp_msg
+                        except Exception as wa_error:
+                            print(f"📱 [WhatsApp] ❌ Error sending: {wa_error}")
+                            decision["whatsapp_sent"] = False
+                            decision["whatsapp_error"] = str(wa_error)
                 
                 return decision
             except json.JSONDecodeError as je:

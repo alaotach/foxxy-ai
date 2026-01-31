@@ -191,12 +191,18 @@ CRITICAL: IGNORE COLORS - Focus ONLY on:
 - Icons and symbols
 
 ELEMENT IDENTIFICATION:
-1. **Buttons**: Rectangular clickable areas with text labels
+1. **PERCENTAGE VALUES** (HIGHEST PRIORITY):
+   - Look for any numbers followed by % symbol (e.g., "+2.34%", "-1.67%", "73.2%")
+   - Common locations: price tickers, indicator panels, portfolio displays
+   - Focus analysis on these percentage areas
+   - Return CENTER of percentage text display
+
+2. **Buttons**: Rectangular clickable areas with text labels
    - Look ONLY for the text (e.g., "Subscribe", "Login", "Sign in", "Create")
    - Ignore button color completely - it can be red, white, blue, gray, anything
    - Return CENTER of button
 
-2. **Search Inputs**: Rectangular boxes with "Search" text or magnifying glass icon
+3. **Search Inputs**: Rectangular boxes with "Search" text or magnifying glass icon
    - Usually 300-600px wide, 40-60px tall
    - Return CENTER of the input box
 
@@ -655,4 +661,145 @@ If you can SEE the element in the screenshot, you MUST return x/y coordinates us
                 return response.choices[0].message.content
         except Exception as e:
             print(f"Vision error: {e}")
-            return f"Error: {e}"
+            return f"Error: {e}"    
+    def seek_element(
+        self,
+        screenshot_base64: str,
+        query: str,
+        viewport_width: int = 1920,
+        viewport_height: int = 1080,
+        return_all: bool = False
+    ) -> Dict:
+        """
+        Seek mode: Find element(s) matching query without clicking
+        
+        Args:
+            screenshot_base64: Base64 encoded screenshot
+            query: What to search for (text or visual description)
+            viewport_width: Viewport width
+            viewport_height: Viewport height
+            return_all: If True, return all matches; if False, return best match
+            
+        Returns:
+            Dict with found elements, coordinates, and confidence
+        """
+        # Add grid for precise coordinates
+        grid_screenshot, actual_width, actual_height = self.add_grid_overlay(screenshot_base64)
+        viewport_width = actual_width
+        viewport_height = actual_height
+        
+        prompt = f"""Analyze this screenshot with coordinate grid to FIND (not click) all instances of: "{query}"
+
+GRID EXPLANATION:
+- RED vertical lines with numbers = X coordinates (horizontal position)
+- GREEN horizontal lines with numbers = Y coordinates (vertical position)
+- Image size: {viewport_width}x{viewport_height} pixels
+
+SPECIAL FOCUS ON PERCENTAGES:
+First, scan the ENTIRE screenshot for ANY percentage values (%, numbers with % symbol) including:
+- Stock price changes (+2.5%, -1.2%)
+- Technical indicators (RSI: 67%, etc.)
+- Portfolio performance (+15.6%)
+- Market changes, gains, losses
+- Any numerical value with % symbol
+
+Then find the requested query: "{query}"
+
+For EACH match found, provide:
+- Exact center coordinates using the grid
+- Element type (button, link, text, image, input, percentage_indicator, etc.)
+- Confidence level (high/medium/low)
+- Brief description of what you see
+- If it's a percentage, include the exact value
+
+Respond with JSON array:
+[
+  {{
+    "x": 340,
+    "y": 280,
+    "element_type": "percentage_indicator",
+    "confidence": "high",
+    "description": "Stock price change +2.34%",
+    "text_content": "+2.34%",
+    "percentage_value": "+2.34%"
+  }},
+  {{
+    "x": 500,
+    "y": 420,
+    "element_type": "button",
+    "confidence": "medium",
+    "description": "Subscribe button",
+    "text_content": "Subscribe"
+  }}
+]
+
+If NOT found, return: []
+
+IMPORTANT:
+- Find ALL matches, not just the first one
+- Use grid numbers for precise coordinates
+- Only include visible elements (not cut off)
+- Return CENTER coordinates of each element"""
+        
+        try:
+            response = requests.post(
+                "https://ai.hackclub.com/proxy/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "temperature": 0.1,
+                    "max_tokens": 500,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{grid_screenshot}"
+                                }
+                            }
+                        ]
+                    }]
+                }
+            )
+            
+            result = response.json()
+            result_text = result["choices"][0]["message"]["content"]
+            
+            # Parse JSON array
+            json_start = result_text.find('[')
+            json_end = result_text.rfind(']') + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                json_text = result_text[json_start:json_end]
+                elements = json.loads(json_text)
+                
+                if not return_all and elements:
+                    # Return best match (highest confidence)
+                    best = max(elements, key=lambda e: 
+                        {"high": 3, "medium": 2, "low": 1}.get(e.get("confidence", "low"), 0)
+                    )
+                    return {
+                        "found": True,
+                        "element": best,
+                        "total_matches": len(elements),
+                        "all_matches": elements
+                    }
+                elif elements:
+                    return {
+                        "found": True,
+                        "elements": elements,
+                        "total_matches": len(elements)
+                    }
+                else:
+                    return {"found": False, "elements": []}
+            else:
+                return {"found": False, "error": "Could not parse response"}
+                
+        except Exception as e:
+            print(f"Seek error: {e}")
+            return {"found": False, "error": str(e)}

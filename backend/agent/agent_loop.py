@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Optional, AsyncIterator
 from agent.schema import TaskPlan, Step
 from agent.planner import plan_task
 from agent.websocket_manager import manager as ws_manager
+from agent.seek_mode import seek_mode
 import asyncio
 import json
 import os
@@ -26,6 +27,7 @@ class AgentLoop:
         self.llm = self.get_llm()
         self.current_task = None
         self.execution_state = "idle"
+        self.seek_mode = seek_mode  # Integrate seek mode
         
     def get_llm(self):
         """Get configured LLM"""
@@ -280,8 +282,160 @@ class AgentLoop:
         return {
             "execution_state": self.execution_state,
             "current_task": self.current_task,
-            "llm_provider": os.getenv("LLM_PROVIDER", "hackclub")
+            "llm_provider": os.getenv("LLM_PROVIDER", "hackclub"),
+            "seek_active": self.seek_mode.is_seeking(self.current_task) if self.current_task else False
         }
+    
+    async def start_seek_mode(
+        self,
+        task_id: str,
+        query: str,
+        seek_type: str = "auto",
+        action: str = "highlight",
+        continuous: bool = False,
+        screenshot_base64: Optional[str] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Start seek mode to search for elements on the page
+        
+        Args:
+            task_id: Unique task identifier
+            query: What to search for
+            seek_type: Type of seek (text, element, vision, auto)
+            action: What to do when found (highlight, extract, click, monitor)
+            continuous: Keep seeking until stopped
+            screenshot_base64: Current page screenshot
+            
+        Yields:
+            Seek updates and results
+        """
+        self.current_task = task_id
+        self.execution_state = "seeking"
+        
+        try:
+            # Send visual feedback to extension
+            await ws_manager.send_message({
+                "action": "startSeekMode",
+                "query": query,
+                "seek_type": seek_type
+            }, task_id)
+            
+            # Start seek operation
+            async for update in self.seek_mode.start_seek(
+                task_id=task_id,
+                seek_type=seek_type,
+                query=query,
+                action=action,
+                continuous=continuous,
+                screenshot_base64=screenshot_base64
+            ):
+                # Forward updates to WebSocket clients
+                await ws_manager.send_message(update, task_id)
+                yield update
+            
+            # Stop seek mode visual feedback
+            await ws_manager.send_message({
+                "action": "stopSeekMode"
+            }, task_id)
+            
+        except Exception as e:
+            yield {
+                "type": "seek_error",
+                "error": str(e),
+                "task_id": task_id
+            }
+        finally:
+            self.execution_state = "idle"
+            self.current_task = None
+    
+    async def stop_seek_mode(self, task_id: str):
+        """Stop seek mode for a task"""
+        stopped = self.seek_mode.stop_seek(task_id)
+        
+        if stopped:
+            await ws_manager.send_message({
+                "action": "stopSeekMode",
+                "task_id": task_id
+            }, task_id)
+        
+        return stopped
+    
+    async def start_stock_monitoring(
+        self,
+        task_id: str,
+        analysis_prompt: str,
+        stock_symbol: Optional[str] = None,
+        whatsapp_number: Optional[str] = None,
+        screenshot_interval: int = 10,
+        get_screenshot_func: Optional[callable] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Start stock chart monitoring with technical analysis
+        
+        Args:
+            task_id: Unique task identifier
+            analysis_prompt: What to analyze (e.g., "RSI below 30 and MACD bullish")
+            stock_symbol: Stock symbol being monitored
+            whatsapp_number: Phone number for WhatsApp alerts
+            screenshot_interval: Screenshot frequency in seconds (default: 10)
+            get_screenshot_func: Function to get fresh screenshots
+            
+        Yields:
+            Stock analysis updates and signal alerts
+        """
+        self.current_task = task_id
+        self.execution_state = "stock_monitoring"
+        
+        try:
+            # Send visual feedback to extension
+            await ws_manager.send_message({
+                "action": "startStockMonitoring",
+                "stock_symbol": stock_symbol,
+                "analysis_prompt": analysis_prompt,
+                "screenshot_interval": screenshot_interval
+            }, task_id)
+            
+            # Start stock monitoring
+            async for update in self.seek_mode.start_stock_monitoring(
+                task_id=task_id,
+                analysis_prompt=analysis_prompt,
+                stock_symbol=stock_symbol,
+                phone_number=whatsapp_number,
+                screenshot_interval=screenshot_interval,
+                get_screenshot_func=get_screenshot_func
+            ):
+                # Forward updates to WebSocket clients
+                await ws_manager.send_message(update, task_id)
+                yield update
+            
+            # Stop monitoring visual feedback
+            await ws_manager.send_message({
+                "action": "stopStockMonitoring"
+            }, task_id)
+            
+        except Exception as e:
+            yield {
+                "type": "stock_monitoring_error",
+                "error": str(e),
+                "task_id": task_id
+            }
+        finally:
+            self.execution_state = "idle"
+            self.current_task = None
+    
+    async def update_stock_screenshot(self, task_id: str, screenshot_base64: str):
+        """
+        Update screenshot for stock monitoring task
+        """
+        from datetime import datetime
+        
+        self.seek_mode.update_screenshot(task_id, screenshot_base64)
+        
+        await ws_manager.send_message({
+            "action": "screenshotUpdated",
+            "task_id": task_id,
+            "timestamp": datetime.now().isoformat()
+        }, task_id)
 
 
 # Global agent loop instance
